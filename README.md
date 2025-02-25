@@ -26,6 +26,7 @@ Poe2OpenAI 是一個將 POE API 轉換為 OpenAI API 格式的代理服務。讓
 - 🚀 Rust 實現
 - 🌐 對 POE API 的 Event 進行完整處理
 - 🐳 Docker 支援
+- 🤖 Cline 支援
 
 ## 🔧 安裝指南
 
@@ -177,3 +178,7 @@ docker run -d -e PORT=3000 -p 3000:3000 jeromeleong/poe2openai:latest
 ## 📄 授權協議
 
 本專案使用 [MIT 授權協議](LICENSE)。
+
+## 🌟 Star 歷史
+
+[![Star History Chart](https://api.star-history.com/svg?repos=jeromeleong/poe2openai&type=Date)](https://star-history.com/#jeromeleong/poe2openai&Date)
