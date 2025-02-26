@@ -102,6 +102,8 @@ pub fn create_query_request(model: &str, messages: Vec<Message>, temperature: Op
         let role = match original_role.as_str() {
             // 總是將 assistant 轉換為 bot
             "assistant" => "bot",
+            // 總是將 developer 轉換為 user
+            "developer" => "user",
             // 只有在 replace_response 為 true 時才轉換 system 為 user
             "system" if should_replace_response => "user",
             // 其他情況保持原樣
