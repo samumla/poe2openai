@@ -1,462 +1,196 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="zh-Hant" class="scroll-smooth">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Models管理介面</title>
-    <link href="/static/all.min.css" rel="stylesheet">
-    <style>
-        :root {
-            --primary-color: #4a90e2;
-            --secondary-color: #f5f5f5;
-            --border-color: #ddd;
-            --text-color: #333;
-            --danger-color: #dc3545;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            line-height: 1.6;
-            color: var(--text-color);
-            background-color: #f8f9fa;
-            padding: 20px;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-            gap: 10px;
-            padding: 15px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .button-group {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-
-        .btn {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            background-color: var(--primary-color);
-            color: white;
-            cursor: pointer;
-            transition: background-color 0.3s;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        .btn:hover {
-            background-color: #357abd;
-        }
-
-        .btn i {
-            font-size: 14px;
-        }
-
-        .api-toggle {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .switch {
-            position: relative;
-            display: inline-block;
-            width: 50px;
-            height: 24px;
-        }
-
-        .switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 24px;
-        }
-
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 16px;
-            width: 16px;
-            left: 4px;
-            bottom: 4px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-
-        input:checked + .slider {
-            background-color: var(--primary-color);
-        }
-
-        input:checked + .slider:before {
-            transform: translateX(26px);
-        }
-
-        .models-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 20px;
-        }
-
-        .model-card {
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .model-info {
-            flex-grow: 1;
-            margin-right: 10px;
-        }
-
-        .model-name {
-            font-size: 14px;
-            color: var(--text-color);
-        }
-
-        .model-mapping {
-            font-size: 14px;
-            color: var(--text-color);
-            margin-top: 4px;
-        }
-
-        .original-name {
-            color: var(--danger-color);
-            text-decoration: line-through;
-            margin-right: 8px;
-        }
-
-        .model-controls {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-
-        .tri-state-checkbox {
-            width: 20px;
-            height: 20px;
-            border: 2px solid var(--border-color);
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            background: white;
-            position: relative;
-        }
-
-        .tri-state-checkbox.v-state {
-            background-color: #fff3cd;
-            border-color: #ffeeba;
-        }
-
-        .tri-state-checkbox.x-state {
-            background-color: #ffe6e6;
-            border-color: #ffcccc;
-        }
-
-        .button-controls {
-            display: flex;
-            gap: 5px;
-        }
-
-        .edit-btn, .reset-btn {
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: var(--primary-color);
-            padding: 5px;
-        }
-
-        .edit-btn:hover, .reset-btn:hover {
-            color: #357abd;
-        }
-
-        .reset-btn {
-            display: none;
-        }
-
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
-            z-index: 1000;
-        }
-
-        .modal-content {
-            background-color: white;
-            padding: 20px;
-            border-radius: 8px;
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            min-width: 300px;
-        }
-
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 15px;
-        }
-
-        .close {
-            cursor: pointer;
-            font-size: 24px;
-        }
-
-        .modal input[type="text"] {
-            width: 100%;
-            padding: 8px;
-            margin-bottom: 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-        }
-
-        .modal-buttons {
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-        }
-
-        .toast {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            padding: 15px 25px;
-            background-color: #333;
-            color: white;
-            border-radius: 4px;
-            display: none;
-            z-index: 1000;
-        }
-
-        .guide-modal {
-            max-width: 800px;
-            width: 90%;
-            max-height: 90vh;
-            overflow-y: auto;
-        }
-
-        .guide-content {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            padding: 20px 0;
-        }
-
-        .guide-item {
-            background: var(--secondary-color);
-            padding: 15px;
-            border-radius: 8px;
-        }
-
-        .guide-item h3 {
-            color: var(--primary-color);
-            margin-bottom: 10px;
-            font-size: 1.1em;
-        }
-
-        .guide-item ul {
-            list-style-type: none;
-            padding-left: 0;
-            margin: 0;
-        }
-
-        .guide-item li {
-            margin-bottom: 8px;
-            line-height: 1.4;
-            font-size: 0.95em;
-        }
-
-        .guide-item strong {
-            color: var(--text-color);
-        }
-
-        .guide-modal::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        .guide-modal::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 4px;
-        }
-
-        .guide-modal::-webkit-scrollbar-thumb {
-            background: var(--primary-color);
-            border-radius: 4px;
-        }
-
-        .guide-modal::-webkit-scrollbar-thumb:hover {
-            background: #357abd;
-        }
-
-        @media (max-width: 768px) {
-            .models-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .header {
-                flex-direction: column;
-                align-items: stretch;
-            }
-
-            .button-group {
-                flex-wrap: wrap;
-                justify-content: center;
-            }
-
-            .api-toggle {
-                justify-content: center;
-            }
-
-            .guide-modal {
-                width: 95%;
-                margin: 10px;
-            }
-
-            .guide-content {
-                grid-template-columns: 1fr;
+    <title>Models 管理介面</title>
+    <link href="./static/fontawesome.css" rel="stylesheet">
+    <script src="./static/tailwind.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            DEFAULT: '#0071e3',
+                            dark: '#2997ff',
+                            light: '#0077ed'
+                        },
+                        secondary: {
+                            DEFAULT: '#f5f5f7',
+                            dark: '#1d1d1f'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+                    },
+                    boxShadow: {
+                        'apple': '0 4px 16px rgba(0, 0, 0, 0.08)',
+                        'apple-dark': '0 4px 16px rgba(255, 255, 255, 0.04)',
+                    },
+                    transitionProperty: {
+                        'height': 'height',
+                        'spacing': 'margin, padding',
+                    }
+                }
             }
         }
-    </style>
+    </script>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="button-group">
-                <button class="btn" onclick="loadModels()">
-                    <i class="fas fa-file-upload"></i>
+<body class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition-colors duration-300 min-h-screen">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <!-- Header -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-apple dark:shadow-apple-dark p-4 sm:p-6 mb-6 transition-all duration-300">
+            <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
+                <h1 class="text-2xl font-medium text-gray-900 dark:text-white">Models 管理介面</h1>
+                
+                <div class="flex flex-wrap items-center gap-3">
+                    <!-- Theme Toggle -->
+                    <button id="themeToggle" class="p-2 rounded-full bg-gray-100 dark:bg-gray-700 transition-colors duration-300">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-yellow-500 dark:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-indigo-300 hidden dark:block" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                        </svg>
+                    </button>
+                    
+                    <!-- API Toggle -->
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm font-medium">啟用自定義</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="apiToggle" class="sr-only peer">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary/50 dark:peer-focus:ring-primary-dark/50 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary dark:peer-checked:bg-primary-dark"></div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="flex flex-wrap gap-3 mt-4">
+                <button onclick="loadModels()" class="inline-flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors duration-200">
+                    <i class="fas fa-file-upload mr-2"></i>
                     讀取
                 </button>
-                <button class="btn" onclick="saveModels()">
-                    <i class="fas fa-save"></i>
+                <button onclick="saveModels()" class="inline-flex items-center px-4 py-2 bg-primary hover:bg-primary-light text-white dark:bg-primary-dark dark:hover:opacity-90 rounded-lg text-sm font-medium transition-colors duration-200">
+                    <i class="fas fa-save mr-2"></i>
                     保存
                 </button>
-                <button class="btn" onclick="fetchModels()">
-                    <i class="fas fa-cloud-download-alt"></i>
+                <button onclick="fetchModels()" class="inline-flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors duration-200">
+                    <i class="fas fa-cloud-download-alt mr-2"></i>
                     爬取Models列表
                 </button>
-                <button class="btn" onclick="showGuide()">
-                    <i class="fas fa-question-circle"></i>
+                <button onclick="showGuide()" class="inline-flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors duration-200">
+                    <i class="fas fa-question-circle mr-2"></i>
                     功能說明
                 </button>
             </div>
-            <div class="api-toggle">
-                <span>啟用Models自定義</span>
-                <label class="switch">
-                    <input type="checkbox" id="apiToggle">
-                    <span class="slider"></span>
-                </label>
-            </div>
         </div>
-
-        <div class="models-grid" id="modelsGrid">
-            <!-- Models將通過JavaScript動態生成 -->
+        
+        <!-- Model Grid -->
+        <div id="modelsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- Models will be dynamically generated here -->
         </div>
     </div>
-
-    <!-- 編輯Modal -->
-    <div id="editModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>編輯Model映射名稱</h2>
-                <span class="close">&times;</span>
+    
+    <!-- Edit Modal -->
+    <div id="editModal" class="fixed inset-0 z-50 bg-black bg-opacity-50 dark:bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6 transform scale-95 transition-transform duration-300">
+            <div class="flex justify-between items-center mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-white">編輯Model映射名稱</h2>
+                <button class="close-modal text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors">
+                    <i class="fas fa-times text-lg"></i>
+                </button>
             </div>
-            <input type="text" id="modelNameInput" placeholder="輸入新的映射名稱">
-            <div class="modal-buttons">
-                <button class="btn" onclick="cancelEdit()">取消</button>
-                <button class="btn" onclick="saveEdit()">保存</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 功能說明Modal -->
-    <div id="guideModal" class="modal">
-        <div class="modal-content guide-modal">
-            <div class="modal-header">
-                <h2>功能說明</h2>
-                <span class="close" onclick="closeGuide()">&times;</span>
-            </div>
-            <div class="guide-content">
-                <div class="guide-item">
-                    <h3>模型狀態設定</h3>
-                    <ul>
-                        <li><strong>無標記 (-)</strong>：保持原始模型設定，不做任何修改</li>
-                        <li><strong>打勾 (V)</strong>：主要針對在Poe 平台使用 replace_response 回應的模型而作出的兼容性處理</li>
-                        <li><strong>打叉 (X)</strong>：停用該模型，在模型列表中將不會顯示此模型</li>
-                    </ul>
-                </div>
-                <div class="guide-item">
-                    <h3>模型映射功能</h3>
-                    <ul>
-                        <li>可為模型設定一個新的顯示名稱，原始名稱會顯示在左側並加上刪除線</li>
-                        <li>適用於需要將模型名稱對應到其他API格式的情況</li>
-                        <li>映射後的名稱將會在所有API端點中使用</li>
-                    </ul>
-                </div>
-                <div class="guide-item">
-                    <h3>全域啟用開關影響範圍</h3>
-                    <ul>
-                        <li>啟用後會影響以下API端點的行為：</li>
-                        <li><strong>模型列表過濾 & 模型映射</strong></li>
-                        <li>- GET /v1/models</li>
-                        <li>- GET /models</li>
-                        <li><strong>聊天事件處理 & 模型映射</strong></li>
-                        <li>- POST /chat/completions</li>
-                        <li>- POST /v1/chat/completions</li>
-                    </ul>
-                </div>
+            <input type="text" id="modelNameInput" placeholder="輸入新的映射名稱" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary dark:focus:ring-primary-dark transition-colors duration-200 mb-5">
+            <div class="flex justify-end gap-3">
+                <button onclick="cancelEdit()" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors duration-200">
+                    取消
+                </button>
+                <button onclick="saveEdit()" class="px-4 py-2 bg-primary hover:bg-primary-light text-white dark:bg-primary-dark dark:hover:opacity-90 rounded-lg text-sm font-medium transition-colors duration-200">
+                    保存
+                </button>
             </div>
         </div>
     </div>
-
-    <!-- Toast通知 -->
-    <div id="toast" class="toast"></div>
-
+    
+    <!-- Guide Modal -->
+    <div id="guideModal" class="fixed inset-0 z-50 bg-black bg-opacity-50 dark:bg-opacity-70 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6 transform scale-95 transition-transform duration-300">
+            <div class="flex justify-between items-center mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-white">功能說明</h2>
+                <button onclick="closeGuide()" class="close-modal text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors">
+                    <i class="fas fa-times text-lg"></i>
+                </button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 py-3">
+                <div class="bg-gray-100 dark:bg-gray-700 p-5 rounded-xl transition-colors duration-200">
+                    <h3 class="text-primary dark:text-primary-dark font-semibold mb-3">模型狀態設定</h3>
+                    <ul class="space-y-2 text-sm">
+                        <li class="flex items-start">
+                            <span class="font-semibold mr-2">無標記 (-)：</span>
+                            <span>保持原始模型設定，不做任何修改</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="font-semibold mr-2">黃色 (R)：</span>
+                            <span>主要針對在Poe平台使用replace_response回應的模型而作出的兼容性處理</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="font-semibold mr-2">打叉 (X)：</span>
+                            <span>停用該模型，在模型列表中將不會顯示此模型</span>
+                        </li>
+                    </ul>
+                </div>
+                <div class="bg-gray-100 dark:bg-gray-700 p-5 rounded-xl transition-colors duration-200">
+                    <h3 class="text-primary dark:text-primary-dark font-semibold mb-3">模型映射功能</h3>
+                    <ul class="space-y-2 text-sm">
+                        <li class="flex items-start">
+                            <span>可為模型設定一個新的顯示名稱，原始名稱會顯示在左側並加上刪除線</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span>適用於需要將模型名稱對應到其他API格式的情況</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span>映射後的名稱將會在所有API端點中使用</span>
+                        </li>
+                    </ul>
+                </div>
+                <div class="bg-gray-100 dark:bg-gray-700 p-5 rounded-xl transition-colors duration-200">
+                    <h3 class="text-primary dark:text-primary-dark font-semibold mb-3">全域啟用開關影響範圍</h3>
+                    <ul class="space-y-2 text-sm">
+                        <li class="flex items-start">
+                            <span>啟用後會影響以下API端點的行為：</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="font-semibold mr-2">模型列表過濾 & 模型映射</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="ml-2">- GET /v1/models</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="ml-2">- GET /models</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="font-semibold mr-2">聊天事件處理 & 模型映射</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="ml-2">- POST /chat/completions</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="ml-2">- POST /v1/chat/completions</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-5 right-5 px-6 py-3 bg-gray-800 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg shadow-lg transform translate-y-10 opacity-0 transition-all duration-300 z-50 pointer-events-none">
+        <span id="toastMessage"></span>
+    </div>
+    
     <script>
         let models = [];
         let currentEditModel = null;
@@ -464,18 +198,69 @@
             enable: false,
             models: {}
         };
-
-        // 初始化頁面
+        let darkMode = localStorage.getItem('darkMode') === 'true';
+        
+        // Initialize the page
         document.addEventListener('DOMContentLoaded', () => {
             fetchModels();
             loadConfig();
+            updateTheme();
+            
+            // Setup theme toggle
+            document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+            
+            // Setup modal close buttons
+            document.querySelectorAll('.close-modal').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    closeModals();
+                });
+            });
+            
+            // Close modals when clicking outside
+            window.addEventListener('click', (event) => {
+                if (event.target.id === 'editModal' || event.target.id === 'guideModal') {
+                    closeModals();
+                }
+            });
         });
-
-        // 加載配置
+        
+        // Theme toggle
+        function toggleTheme() {
+            darkMode = !darkMode;
+            localStorage.setItem('darkMode', darkMode);
+            updateTheme();
+        }
+        
+        function updateTheme() {
+            if (darkMode) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        }
+        
+        // Close all modals
+        function closeModals() {
+            const modals = [
+                document.getElementById('editModal'),
+                document.getElementById('guideModal')
+            ];
+            
+            modals.forEach(modal => {
+                modal.classList.add('opacity-0', 'pointer-events-none');
+                const content = modal.querySelector('div > div');
+                content.classList.add('scale-95');
+                content.classList.remove('scale-100');
+            });
+            
+            currentEditModel = null;
+        }
+        
+        // Load configuration
         async function loadConfig() {
             try {
                 const response = await fetch('/api/admin/config', {
-                    credentials: 'same-origin' // 確保攜帶認證資訊
+                    credentials: 'same-origin'
                 });
                 const data = await response.json();
                 configData = data;
@@ -486,114 +271,120 @@
             }
         }
 
-
+        // Toggle model state
         function toggleModelState(model) {
-            const states = ['-', 'V', 'X'];
+            const states = ['-', 'R', 'X'];
             const currentIndex = states.indexOf(model.state);
             model.state = states[(currentIndex + 1) % 3];
                 
-            // 更新配置
+            // Update configuration
             if (!configData.models[model.name]) {
                 configData.models[model.name] = {};
             }
         
-            // 清除現有狀態
+            // Clear existing state
             delete configData.models[model.name].replace_response;
             delete configData.models[model.name].enable;
         
-            // 根據新狀態設定
-            if (model.state === 'V') {
+            // Set new state
+            if (model.state === 'R') {
                 configData.models[model.name].replace_response = true;
             } else if (model.state === 'X') {
                 configData.models[model.name].enable = false;
             }
         
-            // 如果模型沒有任何設定，則移除整個項目
+            // Remove empty model entries
             if (Object.keys(configData.models[model.name]).length === 0) {
                 delete configData.models[model.name];
             }
         
             renderModels();
         }
-
-        // 渲染Models網格
+        
+        // Render model grid
         function renderModels() {
             const grid = document.getElementById('modelsGrid');
             grid.innerHTML = '';
         
             models.sort((a, b) => a.name.localeCompare(b.name)).forEach(model => {
-                const card = document.createElement('div');
-                card.className = 'model-card';
-                
-                const modelInfo = document.createElement('div');
-                modelInfo.className = 'model-info';
-
-                const nameContainer = document.createElement('div');
-                nameContainer.className = 'model-name';
-
-                // 檢查是否有映射名稱
                 const modelConfig = configData.models[model.name] || {};
-                if (modelConfig.mapping && modelConfig.mapping !== model.name) {
+                const hasMappedName = modelConfig.mapping && modelConfig.mapping !== model.name;
+                
+                const card = document.createElement('div');
+                card.className = 'bg-white dark:bg-gray-800 rounded-xl shadow-apple dark:shadow-apple-dark p-4 transition-all duration-300 flex justify-between items-center';
+                
+                // Model info content
+                const modelInfo = document.createElement('div');
+                modelInfo.className = 'flex-grow pr-3';
+                
+                // Name container
+                const nameSpan = document.createElement('div');
+                nameSpan.className = 'font-medium text-gray-900 dark:text-white transition-colors';
+                
+                if (hasMappedName) {
                     const originalName = document.createElement('span');
-                    originalName.className = 'original-name';
+                    originalName.className = 'line-through text-red-500 dark:text-red-400 mr-2 transition-colors';
                     originalName.textContent = model.name;
                     
                     const mappingName = document.createElement('span');
                     mappingName.textContent = modelConfig.mapping;
                     
-                    nameContainer.appendChild(originalName);
-                    nameContainer.appendChild(mappingName);
+                    nameSpan.appendChild(originalName);
+                    nameSpan.appendChild(mappingName);
                 } else {
-                    nameContainer.textContent = model.name;
+                    nameSpan.textContent = model.name;
                 }
-
-                modelInfo.appendChild(nameContainer);
-
+                
+                modelInfo.appendChild(nameSpan);
+                
+                // Control buttons
                 const controls = document.createElement('div');
-                controls.className = 'model-controls';
-
+                controls.className = 'flex items-center gap-3';
+                
+                // State checkbox
                 const checkbox = document.createElement('div');
-                checkbox.className = 'tri-state-checkbox';
-                if (model.state === 'V') {
-                    checkbox.classList.add('v-state');
-                    checkbox.innerHTML = '&#10003;';
+                checkbox.className = 'w-6 h-6 flex items-center justify-center rounded transition-colors cursor-pointer';
+                
+                if (model.state === '-') {
+                    checkbox.classList.add('bg-gray-200', 'dark:bg-gray-700');
+                } else if (model.state === 'R') {
+                    checkbox.classList.add('bg-yellow-100', 'dark:bg-yellow-900', 'text-yellow-700', 'dark:text-yellow-400', 'font-bold');
+                    checkbox.innerHTML = 'R';
                 } else if (model.state === 'X') {
-                    checkbox.classList.add('x-state');
-                    checkbox.innerHTML = '&#10005;';
+                    checkbox.classList.add('bg-red-100', 'dark:bg-red-900', 'text-red-600', 'dark:text-red-400');
+                    checkbox.innerHTML = '<i class="fas fa-times"></i>';
                 }
+                
                 checkbox.onclick = () => toggleModelState(model);
-
+                
+                // Edit and reset buttons
                 const buttonControls = document.createElement('div');
-                buttonControls.className = 'button-controls';
-
+                buttonControls.className = 'flex gap-2';
+                
                 const editBtn = document.createElement('button');
-                editBtn.className = 'edit-btn';
+                editBtn.className = 'text-primary dark:text-primary-dark hover:opacity-80 transition-opacity';
                 editBtn.innerHTML = '<i class="fas fa-pen"></i>';
                 editBtn.onclick = () => showEditModal(model);
-
+                
                 const resetBtn = document.createElement('button');
-                resetBtn.className = 'reset-btn';
+                resetBtn.className = 'text-gray-500 dark:text-gray-400 hover:opacity-80 transition-opacity ' + 
+                                    (hasMappedName ? '' : 'opacity-0 pointer-events-none');
                 resetBtn.innerHTML = '<i class="fas fa-undo"></i>';
                 resetBtn.onclick = () => resetMapping(model);
                 
-                // 只在有映射時顯示重置按鈕
-                if (modelConfig.mapping && modelConfig.mapping !== model.name) {
-                    resetBtn.style.display = 'block';
-                }
-
                 buttonControls.appendChild(editBtn);
                 buttonControls.appendChild(resetBtn);
-
+                
                 controls.appendChild(checkbox);
                 controls.appendChild(buttonControls);
-
+                
                 card.appendChild(modelInfo);
                 card.appendChild(controls);
                 grid.appendChild(card);
             });
         }
-
-        // 重置映射
+        
+        // Reset mapping
         function resetMapping(model) {
             if (configData.models[model.name]) {
                 delete configData.models[model.name].mapping;
@@ -604,36 +395,49 @@
             renderModels();
             showToast('已重置映射名稱');
         }
-
-        // 顯示編輯Modal
+        
+        // Show edit modal
         function showEditModal(model) {
             currentEditModel = model;
             const modal = document.getElementById('editModal');
+            const modalContent = modal.querySelector('div > div');
             const input = document.getElementById('modelNameInput');
             input.value = configData.models[model.name]?.mapping || '';
-            modal.style.display = 'block';
+            
+            modal.classList.remove('opacity-0', 'pointer-events-none');
+            modalContent.classList.remove('scale-95');
+            modalContent.classList.add('scale-100');
+            
+            setTimeout(() => {
+                input.focus();
+            }, 100);
         }
-
-        // 顯示功能說明Modal
+        
+        // Show guide modal
         function showGuide() {
             const modal = document.getElementById('guideModal');
-            modal.style.display = 'block';
+            const modalContent = modal.querySelector('div > div');
+            
+            modal.classList.remove('opacity-0', 'pointer-events-none');
+            modalContent.classList.remove('scale-95');
+            modalContent.classList.add('scale-100');
         }
-
-        // 關閉功能說明Modal
+        
+        // Close guide modal
         function closeGuide() {
             const modal = document.getElementById('guideModal');
-            modal.style.display = 'none';
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            const content = modal.querySelector('div > div');
+            content.classList.add('scale-95');
+            content.classList.remove('scale-100');
         }
-
-        // 取消編輯
+        
+        // Cancel edit
         function cancelEdit() {
-            const modal = document.getElementById('editModal');
-            modal.style.display = 'none';
-            currentEditModel = null;
+            closeModals();
         }
-
-        // 保存編輯
+        
+        // Save edit
         function saveEdit() {
             const input = document.getElementById('modelNameInput');
             const newName = input.value.trim();
@@ -653,51 +457,39 @@
                     }
                 }
                 renderModels();
-                cancelEdit();
+                closeModals();
                 showToast('修改成功');
             }
         }
-
-        // Modal關閉按鈕
-        document.querySelector('.close').onclick = cancelEdit;
-
-        // 點擊Modal外部關閉
-        window.onclick = (event) => {
-            const editModal = document.getElementById('editModal');
-            const guideModal = document.getElementById('guideModal');
-            if (event.target === editModal) {
-                cancelEdit();
-            }
-            if (event.target === guideModal) {
-                closeGuide();
-            }
-        };
-
-        // 顯示Toast通知
+        
+        // Show toast notification
         function showToast(message) {
             const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.style.display = 'block';
+            const toastMessage = document.getElementById('toastMessage');
+            toastMessage.textContent = message;
+            
+            toast.classList.remove('translate-y-10', 'opacity-0');
+            
             setTimeout(() => {
-                toast.style.display = 'none';
+                toast.classList.add('translate-y-10', 'opacity-0');
             }, 3000);
         }
-
-        // 配置切換
+        
+        // Toggle API configuration
         document.getElementById('apiToggle').onchange = async (e) => {
             const enabled = e.target.checked;
             configData.enable = enabled;
             try {
                 await saveConfig();
-                showToast(`${enabled ? '已啟用' : '已停用'}Model自定義文件`);
+                showToast(`${enabled ? '已啟用' : '已停用'}Model自定義功能`);
             } catch (error) {
                 showToast('更新配置失敗');
                 e.target.checked = !enabled;
                 configData.enable = !enabled;
             }
         };
-
-        // 保存配置
+        
+        // Save configuration
         async function saveConfig() {
             try {
                 const response = await fetch('/api/admin/config', {
@@ -705,7 +497,7 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    credentials: 'same-origin', // 確保攜帶認證資訊
+                    credentials: 'same-origin',
                     body: JSON.stringify(configData)
                 });
                 if (!response.ok) throw new Error('保存失敗');
@@ -715,35 +507,29 @@
                 throw error;
             }
         }
-
-        // 載入Models
+        
+        // Load models
         async function loadModels() {
             try {
-                // 直接從 YAML 重新載入配置，放棄當前所有未儲存的操作
                 const response = await fetch('/api/admin/config');
                 const data = await response.json();
-
-                // 完全替換當前配置
                 configData = data;
-
-                // 重置所有模型的狀態
+                
                 models = models.map(model => ({
                     ...model,
-                    state: configData.models[model.name]?.replace_response ? 'V' :
+                    state: configData.models[model.name]?.replace_response ? 'R' :
                            configData.models[model.name]?.enable === false ? 'X' : '-'
                 }));
-
-                // 重新渲染 UI
+                
                 renderModels();
-
                 showToast('已重新載入配置檔案');
             } catch (error) {
                 showToast('載入配置失敗');
                 console.error('載入配置錯誤:', error);
             }
         }
-
-        // 保存Models
+        
+        // Save models
         async function saveModels() {
             try {
                 await saveConfig();
@@ -751,15 +537,15 @@
                 showToast('保存失敗');
             }
         }
-
-        // 獲取Models列表
+        
+        // Fetch model list
         async function fetchModels() {
             try {
                 const response = await fetch('/api/models');
                 const data = await response.json();
                 models = data.data.map(model => ({
                     name: model.id,
-                    state: configData.models[model.id]?.replace_response ? 'V' :
+                    state: configData.models[model.id]?.replace_response ? 'R' :
                            configData.models[model.id]?.enable === false ? 'X' : '-'
                 }));
                 renderModels();
