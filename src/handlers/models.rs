@@ -1,9 +1,9 @@
-use salvo::prelude::*;
 use poe_api_process::get_model_list;
+use salvo::prelude::*;
 use serde_json::json;
-use tracing::{error, info, debug};
-use std::time::Instant;
 use std::path::Path;
+use std::time::Instant;
+use tracing::{debug, error, info};
 
 use crate::types::*;
 
@@ -18,7 +18,9 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
             debug!("📊 原始模型數量: {}", model_list.data.len());
 
             // 首先進行全部小寫轉換
-            let lowercase_models = model_list.data.into_iter()
+            let lowercase_models = model_list
+                .data
+                .into_iter()
                 .map(|mut model| {
                     debug!("🏷️ 轉換小寫: {} -> {}", model.id, model.id.to_lowercase());
                     model.id = model.id.to_lowercase();
@@ -34,37 +36,34 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
                 });
 
                 let duration = start_time.elapsed();
-                info!("✅ 成功獲取未過濾模型列表 | 模型數量: {} | 處理時間: {}",
+                info!(
+                    "✅ 成功獲取未過濾模型列表 | 模型數量: {} | 處理時間: {}",
                     lowercase_models.len(),
                     crate::utils::format_duration(duration)
                 );
-                
+
                 res.render(Json(response));
                 return;
             }
 
             // 讀取並解析 models.yaml 配置
             let config = match Path::new("models.yaml").exists() {
-                true => {
-                    match std::fs::read_to_string("models.yaml") {
-                        Ok(contents) => {
-                            match serde_yaml::from_str::<Config>(&contents) {
-                                Ok(config) => config,
-                                Err(e) => {
-                                    error!("❌ 解析 models.yaml 失敗: {}", e);
-                                    Config {
-                                        enable: Some(false),
-                                        models: std::collections::HashMap::new(),
-                                    }
-                                }
-                            }
-                        },
+                true => match std::fs::read_to_string("models.yaml") {
+                    Ok(contents) => match serde_yaml::from_str::<Config>(&contents) {
+                        Ok(config) => config,
                         Err(e) => {
-                            error!("❌ 讀取 models.yaml 失敗: {}", e);
+                            error!("❌ 解析 models.yaml 失敗: {}", e);
                             Config {
                                 enable: Some(false),
                                 models: std::collections::HashMap::new(),
                             }
+                        }
+                    },
+                    Err(e) => {
+                        error!("❌ 讀取 models.yaml 失敗: {}", e);
+                        Config {
+                            enable: Some(false),
+                            models: std::collections::HashMap::new(),
                         }
                     }
                 },
@@ -81,16 +80,18 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
             debug!("🔍 設定檔啟用狀態: {}", is_enabled);
 
             // 將 config.models 的鍵轉換為小寫以匹配轉換後的模型 ID
-            let lowercase_config_models: std::collections::HashMap<String, ModelConfig> = config.models
+            let lowercase_config_models: std::collections::HashMap<String, ModelConfig> = config
+                .models
                 .into_iter()
                 .map(|(k, v)| (k.to_lowercase(), v))
                 .collect();
 
-            let processed_models = lowercase_models.into_iter()
+            let processed_models = lowercase_models
+                .into_iter()
                 .filter_map(|mut model| {
                     let model_id = model.id.clone();
                     let config = lowercase_config_models.get(&model_id);
-                    
+
                     if !is_enabled {
                         // 全域停用時，只處理 mapping
                         if let Some(model_config) = config {
@@ -117,7 +118,7 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
                                     debug!("❌ 排除停用模型: {}", model_id);
                                     None
                                 }
-                            },
+                            }
                             None => {
                                 debug!("✅ 無配置，保留模型: {}", model_id);
                                 Some(model)
@@ -133,16 +134,18 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
             });
 
             let duration = start_time.elapsed();
-            info!("✅ 成功獲取處理後模型列表 | 模型數量: {} | 處理時間: {}",
+            info!(
+                "✅ 成功獲取處理後模型列表 | 模型數量: {} | 處理時間: {}",
                 processed_models.len(),
                 crate::utils::format_duration(duration)
             );
-            
+
             res.render(Json(response));
-        },
+        }
         Err(e) => {
             let duration = start_time.elapsed();
-            error!("❌ 獲取模型列表失敗 | 錯誤: {} | 耗時: {}", 
+            error!(
+                "❌ 獲取模型列表失敗 | 錯誤: {} | 耗時: {}",
                 e,
                 crate::utils::format_duration(duration)
             );

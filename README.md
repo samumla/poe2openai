@@ -30,7 +30,7 @@ Poe2OpenAI 是一個將 POE API 轉換為 OpenAI API 格式的代理服務。讓
 
 ## 🔧 安裝指南
 
-### 使用 Docker（推薦）
+### 使用 Docker（簡單部署）
 
 ```bash
 # 拉取映像
@@ -39,13 +39,29 @@ docker pull jeromeleong/poe2openai:latest
 # 運行容器
 docker run --name poe2openai -d \
   -p 8080:8080 \
-  -e ADMIN_USERNAME=admin\
+  -e ADMIN_USERNAME=admin \
+  -e ADMIN_PASSWORD=123456 \
+  jeromeleong/poe2openai:latest
+```
+
+#### 數據持久化（可選）
+
+```bash
+# 創建本地數據目錄
+mkdir -p /path/to/data
+
+# 運行容器並掛載數據目錄
+docker run --name poe2openai -d \
+  -p 8080:8080 \
+  -v /path/to/data:/data \
+  -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=123456 \
   jeromeleong/poe2openai:latest
 ```
 
 ### 使用 Docker Compose
 
+具體內容可根據自己個人需求來進行修改
 ```yaml
 version: '3.8'
 services:
@@ -59,6 +75,9 @@ services:
       - ADMIN_USERNAME=admin
       - ADMIN_PASSWORD=123456
       - MAX_REQUEST_SIZE=1073741824
+      - CONFIG_DIR=/data
+    volumes:
+      - /path/to/data:/data
 ```
 
 ### 從源碼編譯
@@ -147,12 +166,13 @@ curl http://localhost:8080/v1/chat/completions \
 
 服務器配置通過環境變量進行：
 
-- `PORT` - 服務器端口（默認：8080）
-- `HOST` - 服務器主機（默認：0.0.0.0）
-- `ADMIN_USERNAME` - 管理介面用戶名	默認：admin）
-- `ADMIN_PASSWORD` - 管理介面密碼	默認：123456）
-- `MAX_REQUEST_SIZE` - 最大請求大小（默認：1073741824）
-- `LOG_LEVEL` - 日誌級別（默認：info）
+- `PORT` - 服務器端口（默認：`8080`）
+- `HOST` - 服務器主機（默認：`0.0.0.0`）
+- `ADMIN_USERNAME` - 管理介面用戶名	默認：`admin`）
+- `ADMIN_PASSWORD` - 管理介面密碼	默認：`123456`）
+- `MAX_REQUEST_SIZE` - 最大請求大小（默認：`1073741824`）
+- `LOG_LEVEL` - 日誌級別（默認：`info`）
+- `CONFIG_DIR` - 配置文件目錄路徑（docker 環境中默認為：`/data`，本機環境中默認為：`./`）
 
 ## ❓ 常見問題
 

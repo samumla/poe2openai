@@ -48,7 +48,8 @@ ENV HOST=0.0.0.0 \
     MAX_REQUEST_SIZE=1073741824 \
     LOG_LEVEL=info \
     RUST_BACKTRACE=1 \
-    TZ=Asia/Taipei
+    TZ=Asia/Taipei \
+    CONFIG_DIR=/data
 
 # 安裝執行時期依賴
 RUN apt-get update && \
@@ -72,8 +73,14 @@ COPY --from=builder /usr/src/app/target/release/poe2openai /app/
 COPY --from=builder /usr/src/app/templates /app/templates
 COPY --from=builder /usr/src/app/static /app/static
 
+# 創建數據目錄並設置權限
+RUN mkdir -p /data && chown poe:poe /data && chmod 775 /data
+
 # 設定檔案權限
 RUN chown -R poe:poe /app
+
+# 定義volume掛載點
+VOLUME ["/data"]
 
 # 切換到非 root 使用者
 USER poe
@@ -87,4 +94,4 @@ EXPOSE ${PORT}
 # 設定標籤
 LABEL maintainer="Jerome Leong <jeromeleong1998@gmail.com>" \
     description="Poe API to OpenAI API 轉換服務" \
-    version="0.2.1"
+    version="0.2.5"

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::utils::deserialize_content;
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct ChatCompletionRequest {
@@ -18,7 +18,7 @@ pub struct Message {
 
 #[derive(Deserialize)]
 pub struct ContentItem {
-    pub text: String
+    pub text: String,
 }
 
 #[derive(Serialize)]

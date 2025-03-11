@@ -1,5 +1,5 @@
 use crate::types::ContentItem;
-
+use std::path::PathBuf;
 
 pub fn truncate_text(text: &str, max_length: usize) -> String {
     if text.len() <= max_length {
@@ -33,43 +33,41 @@ where
 {
     use serde::de::{self, Visitor};
     use std::fmt;
-
     struct ContentVisitor;
-
     impl<'de> Visitor<'de> for ContentVisitor {
         type Value = String;
-
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter.write_str("string or array of content items")
         }
-
         fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
         where
             E: de::Error,
         {
             Ok(value.to_string())
         }
-
         fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
         where
             E: de::Error,
         {
             Ok(value)
         }
-
         fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
         where
             S: de::SeqAccess<'de>,
         {
             let mut combined_text = String::new();
-            
             while let Some(item) = seq.next_element::<ContentItem>()? {
                 combined_text.push_str(&item.text);
             }
-            
             Ok(combined_text)
         }
     }
-
     deserializer.deserialize_any(ContentVisitor)
+}
+
+pub fn get_config_path(filename: &str) -> PathBuf {
+    let config_dir = std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./".to_string());
+    let mut path = PathBuf::from(config_dir);
+    path.push(filename);
+    path
 }

@@ -1,11 +1,10 @@
-use salvo::prelude::*;
-use salvo::basic_auth::{BasicAuth, BasicAuthValidator};
+use crate::types::Config;
+use crate::utils::get_config_path;
 use askama::Template;
+use salvo::basic_auth::{BasicAuth, BasicAuthValidator};
+use salvo::prelude::*;
 use serde_json::json;
 use std::fs;
-use std::path::Path;
-
-use crate::types::Config;
 
 #[derive(Template)]
 #[template(path = "admin.html")]
@@ -42,9 +41,9 @@ async fn save_config(req: &mut Request, res: &mut Response) {
 }
 
 fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
-    let path = Path::new("models.yaml");
-    if path.exists() {
-        let contents = fs::read_to_string(path)?;
+    let config_path = get_config_path("models.yaml");
+    if config_path.exists() {
+        let contents = fs::read_to_string(config_path)?;
         Ok(serde_yaml::from_str(&contents)?)
     } else {
         Ok(Config {
@@ -56,7 +55,8 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
 
 fn save_config_to_file(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
     let yaml = serde_yaml::to_string(config)?;
-    fs::write("models.yaml", yaml)?;
+    let config_path = get_config_path("models.yaml");
+    fs::write(config_path, yaml)?;
     Ok(())
 }
 
@@ -65,8 +65,10 @@ pub struct AdminAuthValidator;
 
 impl BasicAuthValidator for AdminAuthValidator {
     async fn validate(&self, username: &str, password: &str, _depot: &mut Depot) -> bool {
-        let valid_username = std::env::var("ADMIN_USERNAME").unwrap_or_else(|_| "admin".to_string());
-        let valid_password = std::env::var("ADMIN_PASSWORD").unwrap_or_else(|_| "123456".to_string());
+        let valid_username =
+            std::env::var("ADMIN_USERNAME").unwrap_or_else(|_| "admin".to_string());
+        let valid_password =
+            std::env::var("ADMIN_PASSWORD").unwrap_or_else(|_| "123456".to_string());
         username == valid_username && password == valid_password
     }
 }
@@ -74,9 +76,12 @@ impl BasicAuthValidator for AdminAuthValidator {
 // 修改路由函數
 pub fn admin_routes() -> Router {
     let auth_handler = BasicAuth::new(AdminAuthValidator);
-    
     Router::new()
         .hoop(auth_handler) // 加入認證中間件
         .push(Router::with_path("admin").get(admin_page))
-        .push(Router::with_path("api/admin/config").get(get_config).post(save_config))
+        .push(
+            Router::with_path("api/admin/config")
+                .get(get_config)
+                .post(save_config),
+        )
 }

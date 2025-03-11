@@ -1,3 +1,4 @@
+use chrono::Utc;
 use futures_util::future;
 use futures_util::stream::{self, Stream, StreamExt};
 use nanoid::nanoid;
@@ -7,46 +8,41 @@ use salvo::prelude::*;
 use serde_json::json;
 use std::pin::Pin;
 use std::time::Instant;
-use std::path::Path;
 use tracing::{debug, error, info};
-use chrono::Utc;
 
 use crate::poe_client::{PoeClientWrapper, create_query_request};
 use crate::types::*;
-use crate::utils::{format_bytes_length, format_duration, truncate_text};
+use crate::utils::{format_bytes_length, format_duration, get_config_path, truncate_text};
 
 #[handler]
 pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     let start_time = Instant::now();
     info!("📝 收到新的聊天完成請求");
 
-    let max_size:usize = std::env::var("MAX_REQUEST_SIZE")
+    let max_size: usize = std::env::var("MAX_REQUEST_SIZE")
         .unwrap_or_else(|_| "1073741824".to_string()) // 預設 1GB
         .parse()
         .unwrap_or(1024 * 1024 * 1024);
-    
+
     // 讀取並解析 models.yaml 配置
-    let config = match Path::new("models.yaml").exists() {
-        true => {
-            match std::fs::read_to_string("models.yaml") {
-                Ok(contents) => {
-                    match serde_yaml::from_str::<Config>(&contents) {
-                        Ok(config) => config,
-                        Err(e) => {
-                            error!("❌ 解析 models.yaml 失敗: {}", e);
-                            Config {
-                                enable: Some(false),
-                                models: std::collections::HashMap::new(),
-                            }
-                        }
-                    }
-                },
+    let config_path = get_config_path("models.yaml");
+    let config = match config_path.exists() {
+        true => match std::fs::read_to_string(&config_path) {
+            Ok(contents) => match serde_yaml::from_str::<Config>(&contents) {
+                Ok(config) => config,
                 Err(e) => {
-                    error!("❌ 讀取 models.yaml 失敗: {}", e);
+                    error!("❌ 解析 models.yaml 失敗: {}", e);
                     Config {
                         enable: Some(false),
                         models: std::collections::HashMap::new(),
                     }
+                }
+            },
+            Err(e) => {
+                error!("❌ 讀取 models.yaml 失敗: {}", e);
+                Config {
+                    enable: Some(false),
+                    models: std::collections::HashMap::new(),
                 }
             }
         },
@@ -71,7 +67,7 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
                 res.render(Json(json!({ "error": "無效的 Authorization" })));
                 return;
             }
-        },
+        }
         None => {
             error!("❌ 缺少授權標頭");
             res.status_code(StatusCode::UNAUTHORIZED);
@@ -81,29 +77,28 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     };
 
     let chat_request = match req.payload_with_max_size(max_size).await {
-        Ok(bytes) => {
-            match serde_json::from_slice::<ChatCompletionRequest>(&bytes) {
-                Ok(req) => {
-                    debug!("📊 請求解析成功 | 模型: {} | 訊息數量: {} | 是否串流: {:?}", 
-                        req.model, 
-                        req.messages.len(),
-                        req.stream
-                    );
-                    req
-                },
-                Err(e) => {
-                    error!("❌ JSON 解析失敗: {}", e);
-                    res.status_code(StatusCode::BAD_REQUEST);
-                    res.render(Json(OpenAIErrorResponse {
-                        error: OpenAIError {
-                            message: format!("JSON 解析失敗: {}", e),
-                            r#type: "invalid_request_error".to_string(),
-                            code: "parse_error".to_string(),
-                            param: None,
-                        }
-                    }));
-                    return;
-                }
+        Ok(bytes) => match serde_json::from_slice::<ChatCompletionRequest>(&bytes) {
+            Ok(req) => {
+                debug!(
+                    "📊 請求解析成功 | 模型: {} | 訊息數量: {} | 是否串流: {:?}",
+                    req.model,
+                    req.messages.len(),
+                    req.stream
+                );
+                req
+            }
+            Err(e) => {
+                error!("❌ JSON 解析失敗: {}", e);
+                res.status_code(StatusCode::BAD_REQUEST);
+                res.render(Json(OpenAIErrorResponse {
+                    error: OpenAIError {
+                        message: format!("JSON 解析失敗: {}", e),
+                        r#type: "invalid_request_error".to_string(),
+                        code: "parse_error".to_string(),
+                        param: None,
+                    },
+                }));
+                return;
             }
         },
         Err(e) => {
@@ -115,12 +110,12 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
                     r#type: "invalid_request_error".to_string(),
                     code: "payload_too_large".to_string(),
                     param: None,
-                }
+                },
             }));
             return;
         }
     };
-    
+
     // 尋找映射的原始模型名稱
     let (display_model, original_model) = if config.enable.unwrap_or(false) {
         let requested_model = chat_request.model.clone();
@@ -162,7 +157,11 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
 
     let client = PoeClientWrapper::new(&original_model, &access_key);
 
-    let query_request = create_query_request(&original_model, chat_request.messages, chat_request.temperature);
+    let query_request = create_query_request(
+        &original_model,
+        chat_request.messages,
+        chat_request.temperature,
+    );
 
     let stream = chat_request.stream.unwrap_or(false);
     debug!("🔄 請求模式: {}", if stream { "串流" } else { "非串流" });
@@ -174,7 +173,7 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
             } else {
                 handle_non_stream_response(res, event_stream, &display_model).await;
             }
-        },
+        }
         Err(e) => {
             error!("❌ 建立串流請求失敗: {}", e);
             res.status_code(StatusCode::INTERNAL_SERVER_ERROR);
@@ -186,68 +185,68 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     info!("✅ 請求處理完成 | 耗時: {}", format_duration(duration));
 }
 
-fn convert_poe_error_to_openai(error: &poe_api_process::types::ErrorResponse) -> (StatusCode, OpenAIErrorResponse) {
+fn convert_poe_error_to_openai(
+    error: &poe_api_process::types::ErrorResponse,
+) -> (StatusCode, OpenAIErrorResponse) {
     debug!("🔄 轉換錯誤響應 | 錯誤文本: {}", error.text);
-    
+
     let (status, error_type, code) = if error.text.contains("Internal server error") {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
-            "internal_error"
+            "internal_error",
         )
     } else if error.text.contains("rate limit") {
         (
             StatusCode::TOO_MANY_REQUESTS,
             "rate_limit_exceeded",
-            "rate_limit_exceeded"
+            "rate_limit_exceeded",
         )
     } else if error.text.contains("Invalid token") || error.text.contains("Unauthorized") {
-        (
-            StatusCode::UNAUTHORIZED,
-            "invalid_auth",
-            "invalid_api_key"
-        )
+        (StatusCode::UNAUTHORIZED, "invalid_auth", "invalid_api_key")
     } else if error.text.contains("Bot does not exist") {
-        (
-            StatusCode::NOT_FOUND,
-            "model_not_found",
-            "model_not_found"
-        )
+        (StatusCode::NOT_FOUND, "model_not_found", "model_not_found")
     } else {
-        (
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "bad_request"
-        )
+        (StatusCode::BAD_REQUEST, "invalid_request", "bad_request")
     };
 
-    debug!("📋 錯誤轉換結果 | 狀態碼: {} | 錯誤類型: {}", status.as_u16(), error_type);
+    debug!(
+        "📋 錯誤轉換結果 | 狀態碼: {} | 錯誤類型: {}",
+        status.as_u16(),
+        error_type
+    );
 
-    (status, OpenAIErrorResponse {
-        error: OpenAIError {
-            message: error.text.clone(),
-            r#type: error_type.to_string(),
-            code: code.to_string(),
-            param: None,
-        }
-    })
+    (
+        status,
+        OpenAIErrorResponse {
+            error: OpenAIError {
+                message: error.text.clone(),
+                r#type: error_type.to_string(),
+                code: code.to_string(),
+                param: None,
+            },
+        },
+    )
 }
 
 async fn handle_stream_response(
     res: &mut Response,
     mut event_stream: Pin<Box<dyn Stream<Item = Result<EventResponse, PoeError>> + Send>>,
-    model: &str
+    model: &str,
 ) {
     let start_time = Instant::now();
     let id = nanoid!(10);
     let created = Utc::now().timestamp();
     let model = model.to_string(); // 轉換為擁有的 String
-    
+
     info!("🌊 開始處理串流響應 | ID: {} | 模型: {}", id, model);
 
-    res.headers_mut().insert(header::CONTENT_TYPE, "text/event-stream".parse().unwrap());
-    res.headers_mut().insert(header::CACHE_CONTROL, "no-cache".parse().unwrap());
-    res.headers_mut().insert(header::CONNECTION, "keep-alive".parse().unwrap());
+    res.headers_mut()
+        .insert(header::CONTENT_TYPE, "text/event-stream".parse().unwrap());
+    res.headers_mut()
+        .insert(header::CACHE_CONTROL, "no-cache".parse().unwrap());
+    res.headers_mut()
+        .insert(header::CONNECTION, "keep-alive".parse().unwrap());
 
     let mut replace_response = false;
     let mut full_content = String::new();
@@ -270,7 +269,7 @@ async fn handle_stream_response(
                     debug!("📝 初始內容長度: {}", format_bytes_length(data.text.len()));
                     full_content = data.text;
                 }
-            },
+            }
             EventType::Text => {
                 if let Some(data) = event.data {
                     debug!("📝 收到文本: {}", truncate_text(&data.text, 50));
@@ -278,7 +277,7 @@ async fn handle_stream_response(
                         full_content.push_str(&data.text);
                     }
                 }
-            },
+            }
             EventType::Error => {
                 if !replace_response {
                     if let Some(error) = event.error {
@@ -289,7 +288,7 @@ async fn handle_stream_response(
                         return;
                     }
                 }
-            },
+            }
             EventType::Done => {
                 debug!("✅ 初始事件處理完成");
                 break;
@@ -304,20 +303,26 @@ async fn handle_stream_response(
         let processed_stream = {
             let id = id.clone(); // 為閉包克隆一個副本
             let model = model.clone(); // 為閉包克隆一個副本
-            
+
             stream::once(async move {
                 let content = handle_replace_response(event_stream).await;
-                debug!("📤 處理完成 | 內容長度: {}", format_bytes_length(content.len()));
-                
+                debug!(
+                    "📤 處理完成 | 內容長度: {}",
+                    format_bytes_length(content.len())
+                );
+
                 let content_chunk = create_stream_chunk(&id, created, &model, &content, None);
                 let content_json = serde_json::to_string(&content_chunk).unwrap();
                 let content_message = format!("data: {}\n\n", content_json);
-                
-                let final_chunk = create_stream_chunk(&id, created, &model, "", Some("stop".to_string()));
+
+                let final_chunk =
+                    create_stream_chunk(&id, created, &model, "", Some("stop".to_string()));
                 let final_json = serde_json::to_string(&final_chunk).unwrap();
-                let final_message = format!("{}data: {}\n\ndata: [DONE]\n\n", 
-                    content_message, final_json);
-                
+                let final_message = format!(
+                    "{}data: {}\n\ndata: [DONE]\n\n",
+                    content_message, final_json
+                );
+
                 Ok::<_, std::convert::Infallible>(final_message)
             })
         };
@@ -332,84 +337,111 @@ async fn handle_stream_response(
         let processed_stream = {
             let id = id.clone(); // 為閉包克隆一個副本
             let model = model.clone(); // 為閉包克隆一個副本
-            
-            stream::once(future::ready(Ok::<_, std::convert::Infallible>(initial_message)))
-                .chain(stream::unfold(
-                    (event_stream, false),
-                    move |(mut event_stream, mut is_done)| {
-                        let id = id.clone();
-                        let model = model.clone();
-                        
-                        async move {
-                            if is_done {
-                                debug!("✅ 串流處理完成");
-                                return None;
-                            }
-                            match event_stream.next().await {
-                                Some(Ok(event)) => {
-                                    match event.event {
-                                        EventType::Text => {
-                                            if let Some(data) = event.data {
-                                                debug!("📝 處理文本片段: {}", truncate_text(&data.text, 50));
-                                                let chunk = create_stream_chunk(&id, created, &model, &data.text, None);
-                                                let chunk_json = serde_json::to_string(&chunk).unwrap();
-                                                Some((Ok(format!("data: {}\n\n", chunk_json)), (event_stream, is_done)))
-                                            } else {
-                                                Some((Ok(String::new()), (event_stream, is_done)))
-                                            }
-                                        },
-                                        EventType::Error => {
-                                            if let Some(error) = event.error {
-                                                error!("❌ 串流處理錯誤: {}", error.text);
-                                                let error_chunk = json!({
-                                                    "error": {
-                                                        "message": error.text,
-                                                        "type": "stream_error",
-                                                        "code": "stream_error"
-                                                    }
-                                                });
-                                                let error_message = format!("data: {}\n\ndata: [DONE]\n\n", 
-                                                    serde_json::to_string(&error_chunk).unwrap());
-                                                Some((Ok(error_message), (event_stream, true)))
-                                            } else {
-                                                Some((Ok(String::new()), (event_stream, true)))
-                                            }
-                                        },
-                                        EventType::Done => {
-                                            debug!("✅ 串流完成");
-                                            is_done = true;
-                                            let final_chunk = create_stream_chunk(&id, created, &model, "", Some("stop".to_string()));
-                                            let final_chunk_json = serde_json::to_string(&final_chunk).unwrap();
-                                            Some((Ok(format!("data: {}\n\ndata: [DONE]\n\n", final_chunk_json)), (event_stream, is_done)))
-                                        },
-                                        _ => {
-                                            debug!("⏭️ 忽略其他事件類型");
-                                            Some((Ok(String::new()), (event_stream, is_done)))
-                                        },
-                                    }
-                                },
-                                _ => None,
-                            }
+
+            stream::once(future::ready(Ok::<_, std::convert::Infallible>(
+                initial_message,
+            )))
+            .chain(stream::unfold(
+                (event_stream, false),
+                move |(mut event_stream, mut is_done)| {
+                    let id = id.clone();
+                    let model = model.clone();
+
+                    async move {
+                        if is_done {
+                            debug!("✅ 串流處理完成");
+                            return None;
                         }
-                    },
-                ))
+                        match event_stream.next().await {
+                            Some(Ok(event)) => match event.event {
+                                EventType::Text => {
+                                    if let Some(data) = event.data {
+                                        debug!(
+                                            "📝 處理文本片段: {}",
+                                            truncate_text(&data.text, 50)
+                                        );
+                                        let chunk = create_stream_chunk(
+                                            &id, created, &model, &data.text, None,
+                                        );
+                                        let chunk_json = serde_json::to_string(&chunk).unwrap();
+                                        Some((
+                                            Ok(format!("data: {}\n\n", chunk_json)),
+                                            (event_stream, is_done),
+                                        ))
+                                    } else {
+                                        Some((Ok(String::new()), (event_stream, is_done)))
+                                    }
+                                }
+                                EventType::Error => {
+                                    if let Some(error) = event.error {
+                                        error!("❌ 串流處理錯誤: {}", error.text);
+                                        let error_chunk = json!({
+                                            "error": {
+                                                "message": error.text,
+                                                "type": "stream_error",
+                                                "code": "stream_error"
+                                            }
+                                        });
+                                        let error_message = format!(
+                                            "data: {}\n\ndata: [DONE]\n\n",
+                                            serde_json::to_string(&error_chunk).unwrap()
+                                        );
+                                        Some((Ok(error_message), (event_stream, true)))
+                                    } else {
+                                        Some((Ok(String::new()), (event_stream, true)))
+                                    }
+                                }
+                                EventType::Done => {
+                                    debug!("✅ 串流完成");
+                                    is_done = true;
+                                    let final_chunk = create_stream_chunk(
+                                        &id,
+                                        created,
+                                        &model,
+                                        "",
+                                        Some("stop".to_string()),
+                                    );
+                                    let final_chunk_json =
+                                        serde_json::to_string(&final_chunk).unwrap();
+                                    Some((
+                                        Ok(format!(
+                                            "data: {}\n\ndata: [DONE]\n\n",
+                                            final_chunk_json
+                                        )),
+                                        (event_stream, is_done),
+                                    ))
+                                }
+                                _ => {
+                                    debug!("⏭️ 忽略其他事件類型");
+                                    Some((Ok(String::new()), (event_stream, is_done)))
+                                }
+                            },
+                            _ => None,
+                        }
+                    }
+                },
+            ))
         };
 
         res.stream(processed_stream);
     }
 
     let duration = start_time.elapsed();
-    info!("✅ 串流響應處理完成 | ID: {} | 耗時: {}", id_for_log, format_duration(duration));
+    info!(
+        "✅ 串流響應處理完成 | ID: {} | 耗時: {}",
+        id_for_log,
+        format_duration(duration)
+    );
 }
 
 async fn handle_non_stream_response(
     res: &mut Response,
     mut event_stream: Pin<Box<dyn Stream<Item = Result<EventResponse, PoeError>> + Send>>,
-    model: &str
+    model: &str,
 ) {
     let start_time = Instant::now();
     let id = nanoid!(10);
-    
+
     info!("📦 開始處理非串流響應 | ID: {} | 模型: {}", id, model);
 
     let mut replace_response = false;
@@ -433,7 +465,7 @@ async fn handle_non_stream_response(
                     debug!("📝 初始內容長度: {}", format_bytes_length(data.text.len()));
                     full_content = data.text;
                 }
-            },
+            }
             EventType::Text => {
                 if let Some(data) = event.data {
                     debug!("📝 收到文本: {}", truncate_text(&data.text, 50));
@@ -441,7 +473,7 @@ async fn handle_non_stream_response(
                         full_content.push_str(&data.text);
                     }
                 }
-            },
+            }
             EventType::Error => {
                 if let Some(error) = event.error {
                     error!("❌ 處理錯誤: {}", error.text);
@@ -450,7 +482,7 @@ async fn handle_non_stream_response(
                     res.render(Json(error_response));
                     return;
                 }
-            },
+            }
             EventType::Done => {
                 debug!("✅ 初始事件處理完成");
                 break;
@@ -493,7 +525,7 @@ async fn handle_non_stream_response(
                         debug!("📝 處理文本片段: {}", truncate_text(&data.text, 50));
                         response_content.push_str(&data.text);
                     }
-                },
+                }
                 EventType::Error => {
                     if let Some(error) = event.error {
                         error!("❌ 處理錯誤: {}", error.text);
@@ -502,18 +534,21 @@ async fn handle_non_stream_response(
                         res.render(Json(error_response));
                         return;
                     }
-                },
+                }
                 EventType::Done => {
                     debug!("✅ 回應收集完成");
                     break;
-                },
+                }
                 _ => {
                     debug!("⏭️ 忽略其他事件類型");
                 }
             }
         }
 
-        debug!("📤 準備發送回應 | 內容長度: {}", format_bytes_length(response_content.len()));
+        debug!(
+            "📤 準備發送回應 | 內容長度: {}",
+            format_bytes_length(response_content.len())
+        );
         let response = ChatCompletionResponse {
             id: format!("chatcmpl-{}", id),
             object: "chat.completion".to_string(),
@@ -536,7 +571,11 @@ async fn handle_non_stream_response(
     }
 
     let duration = start_time.elapsed();
-    info!("✅ 非串流響應處理完成 | ID: {} | 耗時: {}", id, format_duration(duration));
+    info!(
+        "✅ 非串流響應處理完成 | ID: {} | 耗時: {}",
+        id,
+        format_duration(duration)
+    );
 }
 
 async fn handle_replace_response(
@@ -544,50 +583,54 @@ async fn handle_replace_response(
 ) -> String {
     let start_time = Instant::now();
     debug!("🔄 開始處理 ReplaceResponse");
-    
+
     use std::sync::{Arc, Mutex};
     use tokio::sync::mpsc;
-    
+
     let (tx, mut rx) = mpsc::channel(1);
     let last_content = Arc::new(Mutex::new(String::new()));
     let accumulated_text = Arc::new(Mutex::new(String::new()));
-    
+
     let last_content_clone = Arc::clone(&last_content);
     let accumulated_text_clone = Arc::clone(&accumulated_text);
-    
+
     tokio::spawn(async move {
         debug!("🏃 啟動背景事件收集任務");
         let mut done_received = false;
-        
+
         while !done_received {
             match event_stream.next().await {
-                Some(Ok(event)) => {
-                    match event.event {
-                        EventType::ReplaceResponse => {
-                            if let Some(data) = event.data {
-                                debug!("📝 更新替換內容 | 長度: {}", format_bytes_length(data.text.len()));
-                                *last_content_clone.lock().unwrap() = data.text;
-                            }
-                        },
-                        EventType::Text => {
-                            if let Some(data) = event.data {
-                                debug!("📝 累加文本內容 | 長度: {}", format_bytes_length(data.text.len()));
-                                accumulated_text_clone.lock().unwrap().push_str(&data.text);
-                            }
-                        },
-                        EventType::Done => {
-                            debug!("✅ 收到完成信號");
-                            done_received = true;
-                            let _ = tx.send(()).await;
-                        },
-                        _ => {
-                            debug!("⏭️ 忽略其他事件類型");
+                Some(Ok(event)) => match event.event {
+                    EventType::ReplaceResponse => {
+                        if let Some(data) = event.data {
+                            debug!(
+                                "📝 更新替換內容 | 長度: {}",
+                                format_bytes_length(data.text.len())
+                            );
+                            *last_content_clone.lock().unwrap() = data.text;
                         }
+                    }
+                    EventType::Text => {
+                        if let Some(data) = event.data {
+                            debug!(
+                                "📝 累加文本內容 | 長度: {}",
+                                format_bytes_length(data.text.len())
+                            );
+                            accumulated_text_clone.lock().unwrap().push_str(&data.text);
+                        }
+                    }
+                    EventType::Done => {
+                        debug!("✅ 收到完成信號");
+                        done_received = true;
+                        let _ = tx.send(()).await;
+                    }
+                    _ => {
+                        debug!("⏭️ 忽略其他事件類型");
                     }
                 },
                 Some(Err(e)) => {
                     error!("❌ 事件處理錯誤: {:?}", e);
-                },
+                }
                 None => {
                     debug!("⚠️ 事件流結束但未收到完成信號");
                     break;
@@ -598,19 +641,21 @@ async fn handle_replace_response(
     });
 
     let _ = rx.recv().await;
-    
+
     let final_content = {
         let replace_content = last_content.lock().unwrap();
         let text_content = accumulated_text.lock().unwrap();
-        
+
         if text_content.len() > replace_content.len() {
-            debug!("📊 選擇累加文本內容 (較長) | 累加長度: {} | 替換長度: {}", 
+            debug!(
+                "📊 選擇累加文本內容 (較長) | 累加長度: {} | 替換長度: {}",
                 format_bytes_length(text_content.len()),
                 format_bytes_length(replace_content.len())
             );
             text_content.clone()
         } else {
-            debug!("📊 選擇替換內容 (較長或相等) | 替換長度: {} | 累加長度: {}", 
+            debug!(
+                "📊 選擇替換內容 (較長或相等) | 替換長度: {} | 累加長度: {}",
                 format_bytes_length(replace_content.len()),
                 format_bytes_length(text_content.len())
             );
@@ -619,15 +664,22 @@ async fn handle_replace_response(
     };
 
     let duration = start_time.elapsed();
-    debug!("✅ ReplaceResponse 處理完成 | 最終內容長度: {} | 耗時: {}", 
+    debug!(
+        "✅ ReplaceResponse 處理完成 | 最終內容長度: {} | 耗時: {}",
         format_bytes_length(final_content.len()),
         format_duration(duration)
     );
-    
+
     final_content
 }
 
-fn create_stream_chunk(id: &str, created: i64, model: &str, content: &str, finish_reason: Option<String>) -> ChatCompletionChunk {
+fn create_stream_chunk(
+    id: &str,
+    created: i64,
+    model: &str,
+    content: &str,
+    finish_reason: Option<String>,
+) -> ChatCompletionChunk {
     let mut delta = Delta {
         role: None,
         content: None,
@@ -640,7 +692,8 @@ fn create_stream_chunk(id: &str, created: i64, model: &str, content: &str, finis
         delta.content = Some(content.to_string());
     }
 
-    debug!("🔧 創建串流片段 | ID: {} | 內容長度: {}", 
+    debug!(
+        "🔧 創建串流片段 | ID: {} | 內容長度: {}",
         id,
         if let Some(content) = &delta.content {
             format_bytes_length(content.len())
