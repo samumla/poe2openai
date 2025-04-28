@@ -60,12 +60,14 @@ pub fn create_query_request(
     model: &str,
     messages: Vec<Message>,
     temperature: Option<f32>,
+    tools: Option<Vec<poe_api_process::types::Tool>>,
 ) -> QueryRequest {
     debug!(
-        "📝 創建查詢請求 | 模型: {} | 訊息數量: {} | 溫度設置: {:?}",
+        "📝 創建查詢請求 | 模型: {} | 訊息數量: {} | 溫度設置: {:?} | 工具數量: {:?}",
         model,
         messages.len(),
-        temperature
+        temperature,
+        tools.as_ref().map(|t| t.len())
     );
 
     // 讀取 models.yaml 配置
@@ -110,7 +112,7 @@ pub fn create_query_request(
         model, should_replace_response
     );
 
-    let query = messages
+    let query = messages.clone()
         .into_iter()
         .map(|msg| {
             let original_role = &msg.role;
@@ -141,6 +143,37 @@ pub fn create_query_request(
         })
         .collect();
 
+    // 處理工具結果消息
+    let mut tool_results = None;
+
+    // 檢查是否有 tool 角色的消息，並將其轉換為 ToolResult
+    if messages.iter().any(|msg| msg.role == "tool") {
+        let mut results = Vec::new();
+        
+        for msg in &messages {
+            if msg.role == "tool" {
+                // 嘗試從內容中解析 tool_call_id
+                if let Some(tool_call_id) = extract_tool_call_id(&msg.content) {
+                    debug!("🔧 處理工具結果 | tool_call_id: {}", tool_call_id);
+                    
+                    results.push(poe_api_process::types::ToolResult {
+                        role: "tool".to_string(),
+                        tool_call_id,
+                        name: "unknown".to_string(), // Poe API 可能不需要具體的名稱
+                        content: msg.content.clone(),
+                    });
+                } else {
+                    debug!("⚠️ 無法從工具消息中提取 tool_call_id");
+                }
+            }
+        }
+        
+        if !results.is_empty() {
+            tool_results = Some(results);
+            debug!("🔧 創建了 {} 個工具結果", tool_results.as_ref().unwrap().len());
+        }
+    }
+
     QueryRequest {
         version: "1".to_string(),
         r#type: "query".to_string(),
@@ -149,5 +182,29 @@ pub fn create_query_request(
         user_id: "".to_string(),
         conversation_id: "".to_string(),
         message_id: "".to_string(),
+        tools,
+        tool_calls: None,
+        tool_results,
     }
+}
+
+// 從工具消息中提取 tool_call_id
+fn extract_tool_call_id(content: &str) -> Option<String> {
+    // 嘗試解析 JSON 格式的內容
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(tool_call_id) = json.get("tool_call_id").and_then(|v| v.as_str()) {
+            return Some(tool_call_id.to_string());
+        }
+    }
+    
+    // 嘗試使用簡單的文本解析
+    if let Some(start) = content.find("tool_call_id") {
+        if let Some(id_start) = content[start..].find('"') {
+            if let Some(id_end) = content[start + id_start + 1..].find('"') {
+                return Some(content[start + id_start + 1..start + id_start + 1 + id_end].to_string());
+            }
+        }
+    }
+    
+    None
 }

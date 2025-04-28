@@ -1,5 +1,6 @@
 use crate::utils::deserialize_content;
 use serde::{Deserialize, Serialize};
+use poe_api_process::types::{Tool, ToolCall};
 
 #[derive(Deserialize)]
 pub struct ChatCompletionRequest {
@@ -7,9 +8,11 @@ pub struct ChatCompletionRequest {
     pub messages: Vec<Message>,
     pub temperature: Option<f32>,
     pub stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<Tool>>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct Message {
     pub role: String,
     #[serde(deserialize_with = "deserialize_content")]
@@ -44,6 +47,8 @@ pub struct CompletionMessage {
     pub role: String,
     pub content: String,
     pub refusal: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
 }
 
 #[derive(Serialize)]
@@ -67,6 +72,8 @@ pub struct Delta {
     pub role: Option<String>,
     pub content: Option<String>,
     pub refusal: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
 }
 
 #[derive(Serialize)]

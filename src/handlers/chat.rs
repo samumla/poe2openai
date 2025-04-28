@@ -161,6 +161,7 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
         &original_model,
         chat_request.messages,
         chat_request.temperature,
+        chat_request.tools,
     );
 
     let stream = chat_request.stream.unwrap_or(false);
@@ -278,6 +279,14 @@ async fn handle_stream_response(
                     }
                 }
             }
+            EventType::Json => {
+                debug!("📝 收到 JSON 事件");
+                // 檢查是否包含工具調用
+                if let Some(tool_calls) = event.tool_calls {
+                    debug!("🔧 收到工具調用，數量: {}", tool_calls.len());
+                    // 在流式模式下，我們會在後續處理中處理工具調用
+                }
+            }
             EventType::Error => {
                 if !replace_response {
                     if let Some(error) = event.error {
@@ -372,6 +381,44 @@ async fn handle_stream_response(
                                         Some((Ok(String::new()), (event_stream, is_done)))
                                     }
                                 }
+                                EventType::Json => {
+                                    // 處理工具調用事件
+                                    if let Some(tool_calls) = event.tool_calls {
+                                        debug!("🔧 處理工具調用，數量: {}", tool_calls.len());
+                                        
+                                        // 創建包含工具調用的 delta
+                                        let tool_delta = Delta {
+                                            role: Some("assistant".to_string()),
+                                            content: None,
+                                            refusal: None,
+                                            tool_calls: Some(tool_calls),
+                                        };
+                                        
+                                        // 創建包含工具調用的 chunk
+                                        let tool_chunk = ChatCompletionChunk {
+                                            id: format!("chatcmpl-{}", id),
+                                            object: "chat.completion.chunk".to_string(),
+                                            created,
+                                            model: model.to_string(),
+                                            choices: vec![Choice {
+                                                index: 0,
+                                                delta: tool_delta,
+                                                finish_reason: Some("tool_calls".to_string()),
+                                            }],
+                                        };
+                                        
+                                        let tool_chunk_json = serde_json::to_string(&tool_chunk).unwrap();
+                                        debug!("📤 發送工具調用 chunk");
+                                        
+                                        Some((
+                                            Ok(format!("data: {}\n\n", tool_chunk_json)),
+                                            (event_stream, is_done),
+                                        ))
+                                    } else {
+                                        debug!("⏭️ 收到 JSON 事件但沒有工具調用");
+                                        Some((Ok(String::new()), (event_stream, is_done)))
+                                    }
+                                }
                                 EventType::Error => {
                                     if let Some(error) = event.error {
                                         error!("❌ 串流處理錯誤: {}", error.text);
@@ -447,6 +494,7 @@ async fn handle_non_stream_response(
     let mut replace_response = false;
     let mut full_content = String::new();
     let mut first_two_events = Vec::new();
+    let mut accumulated_tool_calls: Vec<poe_api_process::types::ToolCall> = Vec::new();
 
     debug!("🔍 檢查初始事件");
     for _ in 0..2 {
@@ -474,6 +522,14 @@ async fn handle_non_stream_response(
                     }
                 }
             }
+            EventType::Json => {
+                debug!("📝 收到 JSON 事件");
+                // 檢查是否包含工具調用
+                if let Some(tool_calls) = event.tool_calls {
+                    debug!("🔧 收到工具調用，數量: {}", tool_calls.len());
+                    accumulated_tool_calls.extend(tool_calls);
+                }
+            }
             EventType::Error => {
                 if let Some(error) = event.error {
                     error!("❌ 處理錯誤: {}", error.text);
@@ -495,6 +551,7 @@ async fn handle_non_stream_response(
         let content = handle_replace_response(event_stream).await;
         debug!("📤 最終內容長度: {}", format_bytes_length(content.len()));
 
+        // 在 ReplaceResponse 模式下，我們不處理工具調用
         let response = ChatCompletionResponse {
             id: format!("chatcmpl-{}", nanoid!(10)),
             object: "chat.completion".to_string(),
@@ -506,6 +563,7 @@ async fn handle_non_stream_response(
                     role: "assistant".to_string(),
                     content,
                     refusal: None,
+                    tool_calls: None,
                 },
                 logprobs: None,
                 finish_reason: Some("stop".to_string()),
@@ -524,6 +582,13 @@ async fn handle_non_stream_response(
                     if let Some(data) = event.data {
                         debug!("📝 處理文本片段: {}", truncate_text(&data.text, 50));
                         response_content.push_str(&data.text);
+                    }
+                }
+                EventType::Json => {
+                    // 檢查是否包含工具調用
+                    if let Some(tool_calls) = event.tool_calls {
+                        debug!("🔧 處理工具調用，數量: {}", tool_calls.len());
+                        accumulated_tool_calls.extend(tool_calls);
                     }
                 }
                 EventType::Error => {
@@ -545,10 +610,20 @@ async fn handle_non_stream_response(
             }
         }
 
+        // 確定 finish_reason
+        let finish_reason = if !accumulated_tool_calls.is_empty() {
+            "tool_calls".to_string()
+        } else {
+            "stop".to_string()
+        };
+
         debug!(
-            "📤 準備發送回應 | 內容長度: {}",
-            format_bytes_length(response_content.len())
+            "📤 準備發送回應 | 內容長度: {} | 工具調用數量: {} | 完成原因: {}",
+            format_bytes_length(response_content.len()),
+            accumulated_tool_calls.len(),
+            finish_reason
         );
+        
         let response = ChatCompletionResponse {
             id: format!("chatcmpl-{}", id),
             object: "chat.completion".to_string(),
@@ -560,9 +635,14 @@ async fn handle_non_stream_response(
                     role: "assistant".to_string(),
                     content: response_content,
                     refusal: None,
+                    tool_calls: if accumulated_tool_calls.is_empty() {
+                        None
+                    } else {
+                        Some(accumulated_tool_calls)
+                    },
                 },
                 logprobs: None,
-                finish_reason: Some("stop".to_string()),
+                finish_reason: Some(finish_reason),
             }],
             usage: None,
         };
@@ -684,6 +764,7 @@ fn create_stream_chunk(
         role: None,
         content: None,
         refusal: None,
+        tool_calls: None,
     };
 
     if content.is_empty() && finish_reason.is_none() {
