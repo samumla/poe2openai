@@ -112,7 +112,8 @@ pub fn create_query_request(
         model, should_replace_response
     );
 
-    let query = messages.clone()
+    let query = messages
+        .clone()
         .into_iter()
         .map(|msg| {
             let original_role = &msg.role;
@@ -149,13 +150,13 @@ pub fn create_query_request(
     // 檢查是否有 tool 角色的消息，並將其轉換為 ToolResult
     if messages.iter().any(|msg| msg.role == "tool") {
         let mut results = Vec::new();
-        
+
         for msg in &messages {
             if msg.role == "tool" {
                 // 嘗試從內容中解析 tool_call_id
                 if let Some(tool_call_id) = extract_tool_call_id(&msg.content) {
                     debug!("🔧 處理工具結果 | tool_call_id: {}", tool_call_id);
-                    
+
                     results.push(poe_api_process::types::ToolResult {
                         role: "tool".to_string(),
                         tool_call_id,
@@ -167,10 +168,13 @@ pub fn create_query_request(
                 }
             }
         }
-        
+
         if !results.is_empty() {
             tool_results = Some(results);
-            debug!("🔧 創建了 {} 個工具結果", tool_results.as_ref().unwrap().len());
+            debug!(
+                "🔧 創建了 {} 個工具結果",
+                tool_results.as_ref().unwrap().len()
+            );
         }
     }
 
@@ -196,15 +200,17 @@ fn extract_tool_call_id(content: &str) -> Option<String> {
             return Some(tool_call_id.to_string());
         }
     }
-    
+
     // 嘗試使用簡單的文本解析
     if let Some(start) = content.find("tool_call_id") {
         if let Some(id_start) = content[start..].find('"') {
             if let Some(id_end) = content[start + id_start + 1..].find('"') {
-                return Some(content[start + id_start + 1..start + id_start + 1 + id_end].to_string());
+                return Some(
+                    content[start + id_start + 1..start + id_start + 1 + id_end].to_string(),
+                );
             }
         }
     }
-    
+
     None
 }

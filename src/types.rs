@@ -1,6 +1,6 @@
 use crate::utils::deserialize_content;
-use serde::{Deserialize, Serialize};
 use poe_api_process::types::{Tool, ToolCall};
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct ChatCompletionRequest {

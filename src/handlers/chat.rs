@@ -58,9 +58,9 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     let access_key = match req.headers().get("Authorization") {
         Some(auth) => {
             let auth_str = auth.to_str().unwrap_or("");
-            if auth_str.starts_with("Bearer ") {
-                debug!("🔑 驗證令牌長度: {}", auth_str[7..].len());
-                auth_str[7..].to_string()
+            if let Some(stripped) = auth_str.strip_prefix("Bearer ") {
+                debug!("🔑 驗證令牌長度: {}", stripped.len());
+                stripped.to_string()
             } else {
                 error!("❌ 無效的授權格式");
                 res.status_code(StatusCode::UNAUTHORIZED);
@@ -77,7 +77,7 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     };
 
     let chat_request = match req.payload_with_max_size(max_size).await {
-        Ok(bytes) => match serde_json::from_slice::<ChatCompletionRequest>(&bytes) {
+        Ok(bytes) => match serde_json::from_slice::<ChatCompletionRequest>(bytes) {
             Ok(req) => {
                 debug!(
                     "📊 請求解析成功 | 模型: {} | 訊息數量: {} | 是否串流: {:?}",
@@ -312,11 +312,14 @@ async fn handle_stream_response(
         let processed_stream = {
             let id = id.clone(); // 為閉包克隆一個副本
             let model = model.clone(); // 為閉包克隆一個副本
+            let initial_content_for_handler = full_content.clone(); // 複製初始內容以傳遞
 
             stream::once(async move {
-                let content = handle_replace_response(event_stream).await;
+                // 將初始內容傳遞給 handle_replace_response
+                let content =
+                    handle_replace_response(event_stream, initial_content_for_handler).await;
                 debug!(
-                    "📤 處理完成 | 內容長度: {}",
+                    "📤 ReplaceResponse 處理完成 | 最終內容長度: {}",
                     format_bytes_length(content.len())
                 );
 
@@ -385,7 +388,7 @@ async fn handle_stream_response(
                                     // 處理工具調用事件
                                     if let Some(tool_calls) = event.tool_calls {
                                         debug!("🔧 處理工具調用，數量: {}", tool_calls.len());
-                                        
+
                                         // 創建包含工具調用的 delta
                                         let tool_delta = Delta {
                                             role: Some("assistant".to_string()),
@@ -393,7 +396,7 @@ async fn handle_stream_response(
                                             refusal: None,
                                             tool_calls: Some(tool_calls),
                                         };
-                                        
+
                                         // 創建包含工具調用的 chunk
                                         let tool_chunk = ChatCompletionChunk {
                                             id: format!("chatcmpl-{}", id),
@@ -406,10 +409,11 @@ async fn handle_stream_response(
                                                 finish_reason: Some("tool_calls".to_string()),
                                             }],
                                         };
-                                        
-                                        let tool_chunk_json = serde_json::to_string(&tool_chunk).unwrap();
+
+                                        let tool_chunk_json =
+                                            serde_json::to_string(&tool_chunk).unwrap();
                                         debug!("📤 發送工具調用 chunk");
-                                        
+
                                         Some((
                                             Ok(format!("data: {}\n\n", tool_chunk_json)),
                                             (event_stream, is_done),
@@ -547,9 +551,14 @@ async fn handle_non_stream_response(
     }
 
     if replace_response {
-        debug!("🔄 使用 ReplaceResponse 處理模式");
-        let content = handle_replace_response(event_stream).await;
-        debug!("📤 最終內容長度: {}", format_bytes_length(content.len()));
+        debug!("🔄 使用 ReplaceResponse 處理模式 (非串流)");
+        // 將初始內容傳遞給 handle_replace_response
+        let initial_content_for_handler = full_content.clone();
+        let content = handle_replace_response(event_stream, initial_content_for_handler).await;
+        debug!(
+            "📤 ReplaceResponse 最終內容長度 (非串流): {}",
+            format_bytes_length(content.len())
+        ); // 區分日誌
 
         // 在 ReplaceResponse 模式下，我們不處理工具調用
         let response = ChatCompletionResponse {
@@ -623,7 +632,7 @@ async fn handle_non_stream_response(
             accumulated_tool_calls.len(),
             finish_reason
         );
-        
+
         let response = ChatCompletionResponse {
             id: format!("chatcmpl-{}", id),
             object: "chat.completion".to_string(),
@@ -660,15 +669,20 @@ async fn handle_non_stream_response(
 
 async fn handle_replace_response(
     mut event_stream: Pin<Box<dyn Stream<Item = Result<EventResponse, PoeError>> + Send>>,
+    initial_content: String,
 ) -> String {
     let start_time = Instant::now();
-    debug!("🔄 開始處理 ReplaceResponse");
+    debug!(
+        "🔄 開始處理 ReplaceResponse | 初始內容長度: {}",
+        format_bytes_length(initial_content.len())
+    ); // 更新日誌
 
     use std::sync::{Arc, Mutex};
     use tokio::sync::mpsc;
 
     let (tx, mut rx) = mpsc::channel(1);
-    let last_content = Arc::new(Mutex::new(String::new()));
+    // 使用傳入的 initial_content 初始化 last_content
+    let last_content = Arc::new(Mutex::new(initial_content));
     let accumulated_text = Arc::new(Mutex::new(String::new()));
 
     let last_content_clone = Arc::clone(&last_content);
