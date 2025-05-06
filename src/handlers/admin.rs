@@ -1,6 +1,7 @@
 use crate::types::Config;
-use crate::utils::get_config_path;
+use crate::utils::{get_config_path, CONFIG_CACHE};
 use askama::Template;
+use tracing::{debug, info};
 use salvo::basic_auth::{BasicAuth, BasicAuthValidator};
 use salvo::prelude::*;
 use serde_json::json;
@@ -18,6 +19,7 @@ async fn admin_page(res: &mut Response) {
 
 #[handler]
 async fn get_config(res: &mut Response) {
+    invalidate_config_cache();
     let config = load_config().unwrap_or_default();
     res.render(Json(config));
 }
@@ -30,6 +32,8 @@ async fn save_config(req: &mut Request, res: &mut Response) {
                 res.status_code(StatusCode::INTERNAL_SERVER_ERROR);
                 res.render(Json(json!({ "error": e.to_string() })));
             } else {
+                info!("✅ models.yaml 已成功儲存。");
+                invalidate_config_cache();
                 res.render(Json(json!({ "status": "success" })));
             }
         }
@@ -60,7 +64,15 @@ fn save_config_to_file(config: &Config) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-// 定義驗證器結構
+fn invalidate_config_cache() {
+    if let Some(cache_instance) = CONFIG_CACHE.get() {
+        info!("🗑️ 清除 models.yaml 設定緩存...");
+        cache_instance.remove(&"models.yaml".to_string());
+    } else {
+        debug!("🤔 CONFIG_CACHE 尚未初始化，無需清除。");
+    }
+}
+
 pub struct AdminAuthValidator;
 
 impl BasicAuthValidator for AdminAuthValidator {
@@ -73,7 +85,6 @@ impl BasicAuthValidator for AdminAuthValidator {
     }
 }
 
-// 修改路由函數
 pub fn admin_routes() -> Router {
     let auth_handler = BasicAuth::new(AdminAuthValidator);
     Router::new()

@@ -20,14 +20,14 @@ Poe2OpenAI 是一個將 POE API 轉換為 OpenAI API 格式的代理服務。讓
 - [授權協議](#-授權協議)
 
 ## ✨ 主要特點
-- 🔄 支援 OpenAI API 格式（/models 和 /chat/completions）
+- 🔄 支援 OpenAI API 格式（`/models` 和 `/chat/completions`）
 - 💬 支援串流和非串流模式
 - 🔧 支援工具調用 (Tool Calls)
-- 📊 Web 管理介面用於配置模型（模型映射 和 編輯/models 顯示的模型）
-- 🚀 Rust 實現
 - 🌐 對 POE API 的 Event 進行完整處理
-- 🐳 Docker 佈置支持
 - 🤖 Cline/Roo Code 支持
+- 📊 Web 管理介面(`/admin`)用於配置模型（模型映射 和 編輯`/models` 顯示的模型）
+  - 啟用配置模型的功能會通過緩存`/models`的模型減少文件的讀取（`/admin`可自動刷新緩存）
+- 🐳 Docker 佈置支持
 
 ## 🔧 安裝指南
 

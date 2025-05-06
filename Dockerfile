@@ -19,7 +19,7 @@ WORKDIR /usr/src/app
 # 複製 Cargo.toml
 COPY Cargo.toml ./
 
-# 建立虛擬的 src 目錄和主檔案以快取依賴
+# 建立虛擬的 src 目錄和主檔案以緩存依賴
 RUN mkdir src && \
     echo "fn main() {}" > src/main.rs
 
@@ -94,4 +94,4 @@ EXPOSE ${PORT}
 # 設定標籤
 LABEL maintainer="Jerome Leong <jeromeleong1998@gmail.com>" \
     description="Poe API to OpenAI API 轉換服務" \
-    version="0.2.7"
+    version="0.3.0"

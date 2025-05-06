@@ -10,9 +10,9 @@ use std::pin::Pin;
 use std::time::Instant;
 use tracing::{debug, error, info};
 
-use crate::poe_client::{PoeClientWrapper, create_query_request};
 use crate::types::*;
-use crate::utils::{format_bytes_length, format_duration, get_config_path, truncate_text};
+use crate::poe_client::{PoeClientWrapper, create_query_request};
+use crate::utils::{format_bytes_length, format_duration,get_cached_config};
 
 #[handler]
 pub async fn chat_completions(req: &mut Request, res: &mut Response) {
@@ -20,40 +20,13 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     info!("📝 收到新的聊天完成請求");
 
     let max_size: usize = std::env::var("MAX_REQUEST_SIZE")
-        .unwrap_or_else(|_| "1073741824".to_string()) // 預設 1GB
+        .unwrap_or_else(|_| "1073741824".to_string())
         .parse()
         .unwrap_or(1024 * 1024 * 1024);
 
-    // 讀取並解析 models.yaml 配置
-    let config_path = get_config_path("models.yaml");
-    let config = match config_path.exists() {
-        true => match std::fs::read_to_string(&config_path) {
-            Ok(contents) => match serde_yaml::from_str::<Config>(&contents) {
-                Ok(config) => config,
-                Err(e) => {
-                    error!("❌ 解析 models.yaml 失敗: {}", e);
-                    Config {
-                        enable: Some(false),
-                        models: std::collections::HashMap::new(),
-                    }
-                }
-            },
-            Err(e) => {
-                error!("❌ 讀取 models.yaml 失敗: {}", e);
-                Config {
-                    enable: Some(false),
-                    models: std::collections::HashMap::new(),
-                }
-            }
-        },
-        false => {
-            debug!("⚠️ models.yaml 不存在，預設為不啟用");
-            Config {
-                enable: Some(false),
-                models: std::collections::HashMap::new(),
-            }
-        }
-    };
+    // 從緩存獲取 models.yaml 配置
+    let config = get_cached_config().await;
+    debug!("🔧 從緩存獲取配置 | 啟用狀態: {:?}", config.enable);
 
     let access_key = match req.headers().get("Authorization") {
         Some(auth) => {
@@ -157,12 +130,12 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
 
     let client = PoeClientWrapper::new(&original_model, &access_key);
 
-    let query_request = create_query_request(
+    let query_request: poe_api_process::QueryRequest = create_query_request(
         &original_model,
         chat_request.messages,
         chat_request.temperature,
         chat_request.tools,
-    );
+    ).await;
 
     let stream = chat_request.stream.unwrap_or(false);
     debug!("🔄 請求模式: {}", if stream { "串流" } else { "非串流" });
@@ -267,13 +240,11 @@ async fn handle_stream_response(
                 debug!("🔄 檢測到 ReplaceResponse 模式");
                 replace_response = true;
                 if let Some(data) = event.data {
-                    debug!("📝 初始內容長度: {}", format_bytes_length(data.text.len()));
                     full_content = data.text;
                 }
             }
             EventType::Text => {
                 if let Some(data) = event.data {
-                    debug!("📝 收到文本: {}", truncate_text(&data.text, 50));
                     if !replace_response {
                         full_content.push_str(&data.text);
                     }
@@ -368,10 +339,6 @@ async fn handle_stream_response(
                             Some(Ok(event)) => match event.event {
                                 EventType::Text => {
                                     if let Some(data) = event.data {
-                                        debug!(
-                                            "📝 處理文本片段: {}",
-                                            truncate_text(&data.text, 50)
-                                        );
                                         let chunk = create_stream_chunk(
                                             &id, created, &model, &data.text, None,
                                         );
@@ -514,13 +481,11 @@ async fn handle_non_stream_response(
                 debug!("🔄 檢測到 ReplaceResponse 模式");
                 replace_response = true;
                 if let Some(data) = event.data {
-                    debug!("📝 初始內容長度: {}", format_bytes_length(data.text.len()));
                     full_content = data.text;
                 }
             }
             EventType::Text => {
                 if let Some(data) = event.data {
-                    debug!("📝 收到文本: {}", truncate_text(&data.text, 50));
                     if !replace_response {
                         full_content.push_str(&data.text);
                     }
@@ -589,7 +554,6 @@ async fn handle_non_stream_response(
             match event.event {
                 EventType::Text => {
                     if let Some(data) = event.data {
-                        debug!("📝 處理文本片段: {}", truncate_text(&data.text, 50));
                         response_content.push_str(&data.text);
                     }
                 }

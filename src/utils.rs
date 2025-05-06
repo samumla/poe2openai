@@ -1,13 +1,11 @@
-use crate::types::ContentItem;
+use crate::types::{ContentItem,Config};
+use quick_cache::sync::Cache;
+use std::path::Path;
+use std::sync::Arc;
+use tracing::{debug, error, info, warn};
 use std::path::PathBuf;
 
-pub fn truncate_text(text: &str, max_length: usize) -> String {
-    if text.len() <= max_length {
-        text.to_string()
-    } else {
-        format!("{}...", &text[..max_length])
-    }
-}
+pub static CONFIG_CACHE: std::sync::OnceLock<Cache<String, Arc<Config>>> = std::sync::OnceLock::new();
 
 pub fn format_bytes_length(bytes: usize) -> String {
     if bytes < 1024 {
@@ -70,4 +68,63 @@ pub fn get_config_path(filename: &str) -> PathBuf {
     let mut path = PathBuf::from(config_dir);
     path.push(filename);
     path
+}
+
+pub fn load_config_from_yaml() -> Result<Config, String> {
+    let path_str = "models.yaml";
+    let path = Path::new(path_str);
+
+    if path.exists() {
+        match std::fs::read_to_string(path) {
+            Ok(contents) => match serde_yaml::from_str::<Config>(&contents) {
+                Ok(config) => {
+                    info!("✅ 成功讀取並解析 {}", path_str);
+                    Ok(config)
+                }
+                Err(e) => {
+                    error!("❌ 解析 {} 失敗: {}", path_str, e);
+                    Err(format!("解析 {} 失敗: {}", path_str, e))
+                }
+            },
+            Err(e) => {
+                error!("❌ 讀取 {} 失敗: {}", path_str, e);
+                Err(format!("讀取 {} 失敗: {}", path_str, e))
+            }
+        }
+    } else {
+        debug!("⚠️  {} 不存在，使用預設空配置", path_str);
+        // 返回一個預設的 Config，表示文件不存在或無法讀取
+        Ok(Config {
+            enable: Some(false),
+            models: std::collections::HashMap::new(),
+        })
+    }
+}
+
+pub async fn get_cached_config() -> Arc<Config> {
+    let cache_instance = CONFIG_CACHE.get_or_init(|| {
+        info!("🚀 正在初始化 YAML 配置緩存...");
+        Cache::<String, Arc<Config>>::new(2)
+    });
+
+    // 嘗試從緩存獲取，如果失敗則加載
+    let config_result = cache_instance.get_or_insert_with("models.yaml", || {
+        debug!("💾 YAML 配置緩存未命中，嘗試從 YAML 加載...");
+        load_config_from_yaml().map(Arc::new)
+    });
+
+    match config_result {
+        Ok(config_arc) => {
+            debug!("✅ 成功從緩存中取回配置。");
+            config_arc
+        }
+        Err(e) => {
+            // 如果從緩存獲取或從文件加載都失敗，返回預設配置
+            warn!("⚠️ 無法載入或插入配置到緩存：{}。使用預設空配置。", e);
+            Arc::new(Config {
+                enable: Some(false),
+                models: std::collections::HashMap::new(),
+            })
+        }
+    }
 }

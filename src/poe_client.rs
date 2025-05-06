@@ -1,11 +1,11 @@
 use futures_util::Stream;
 use poe_api_process::{EventResponse, PoeClient, PoeError, ProtocolMessage, QueryRequest};
-use std::path::Path;
 use std::pin::Pin;
 use std::time::Instant;
 use tracing::{debug, error, info};
+use std::sync::Arc;
 
-use crate::types::*;
+use crate::{types::*, utils::get_cached_config};
 
 pub struct PoeClientWrapper {
     client: PoeClient,
@@ -56,7 +56,7 @@ impl PoeClientWrapper {
     }
 }
 
-pub fn create_query_request(
+pub async fn create_query_request(
     model: &str,
     messages: Vec<Message>,
     temperature: Option<f32>,
@@ -70,38 +70,11 @@ pub fn create_query_request(
         tools.as_ref().map(|t| t.len())
     );
 
-    // 讀取 models.yaml 配置
-    let config = match Path::new("models.yaml").exists() {
-        true => match std::fs::read_to_string("models.yaml") {
-            Ok(contents) => match serde_yaml::from_str::<Config>(&contents) {
-                Ok(config) => config,
-                Err(e) => {
-                    error!("❌ 解析 models.yaml 失敗: {}", e);
-                    Config {
-                        enable: Some(false),
-                        models: std::collections::HashMap::new(),
-                    }
-                }
-            },
-            Err(e) => {
-                error!("❌ 讀取 models.yaml 失敗: {}", e);
-                Config {
-                    enable: Some(false),
-                    models: std::collections::HashMap::new(),
-                }
-            }
-        },
-        false => {
-            debug!("⚠️ models.yaml 不存在，使用標準處理");
-            Config {
-                enable: Some(false),
-                models: std::collections::HashMap::new(),
-            }
-        }
-    };
+    // 從緩存獲取 models.yaml 配置
+    let config: Arc<Config> = get_cached_config().await;
 
     // 檢查模型是否需要 replace_response 處理
-    let should_replace_response = if let Some(model_config) = config.models.get(model) {
+    let should_replace_response = if let Some(model_config) = config.models.get(model) { // 使用快取的 config
         model_config.replace_response.unwrap_or(false)
     } else {
         false

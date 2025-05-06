@@ -95,7 +95,7 @@ pub(crate) struct Config {
     pub(crate) models: std::collections::HashMap<String, ModelConfig>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub(crate) struct ModelConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) mapping: Option<String>,
