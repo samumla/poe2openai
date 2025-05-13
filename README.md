@@ -6,6 +6,7 @@
 [![Docker Size](https://img.shields.io/docker/image-size/jeromeleong/poe2openai/latest
 )](https://hub.docker.com/r/jeromeleong/poe2openai)
 [![Docker Pulls](https://img.shields.io/docker/pulls/jeromeleong/poe2openai)](https://hub.docker.com/r/jeromeleong/poe2openai)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/jeromeleong/poe2openai)
 
 Poe2OpenAI 是一個將 POE API 轉換為 OpenAI API 格式的代理服務。讓 Poe 訂閱者能夠通過 OpenAI API 格式使用Poe 的各種AI模型
 
