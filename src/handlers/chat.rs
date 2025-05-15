@@ -14,6 +14,222 @@ use crate::types::*;
 use crate::poe_client::{PoeClientWrapper, create_query_request};
 use crate::utils::{format_bytes_length, format_duration,get_cached_config};
 
+// Helper function to format content with <think> tags for non-streaming and ReplaceResponse cases
+fn format_reasoning_content(content: &str) -> String {
+    let mut result = String::new();
+    let mut lines = content.lines().peekable();
+    let mut in_reasoning_block = false;
+    let mut reasoning_text = String::new();
+    const THINKING_MARKER_1: &str = "Thinking...";
+    const THINKING_MARKER_2: &str = "*Thinking...*";
+
+    while let Some(line_str) = lines.next() {
+        let trimmed_line_for_marker_check = line_str.trim(); // Used for "Thinking..." check
+
+        if trimmed_line_for_marker_check == THINKING_MARKER_1 || trimmed_line_for_marker_check == THINKING_MARKER_2 {
+            if in_reasoning_block {
+                // Already in a block, treat "Thinking..." as part of the ongoing reasoning content
+                if !reasoning_text.is_empty() {
+                    reasoning_text.push_str(line_str);
+                    reasoning_text.push('\n');
+                } else {
+                    // This case (in_reasoning_block true but reasoning_text empty) implies
+                    // "Thinking..." -> empty lines -> "Thinking...". Treat second as content.
+                    // Or, if it's just "Thinking..." -> "Thinking...", the first one is consumed,
+                    // and this one starts a new block or becomes content if no ">" follows.
+                    // For simplicity, if already in_reasoning_block, it's content.
+                    // This path might need refinement if nested <think> is a concern or
+                    // if "Thinking..." itself should never be inside <think>.
+                    // Current logic: "Thinking..." line is consumed if it starts a block.
+                    // If another "Thinking..." appears while processing ">" lines, it's content.
+                    result.push_str(line_str);
+                    result.push('\n');
+                }
+            } else {
+                // Start of a new reasoning block
+                in_reasoning_block = true;
+                reasoning_text.clear();
+                // The "Thinking..." line itself is consumed and not included in <think> content.
+                // Skip immediate blank lines after "Thinking..."
+                while let Some(next_line) = lines.peek() {
+                    if next_line.trim().is_empty() {
+                        lines.next(); // Consume the blank line
+                    } else {
+                        break;
+                    }
+                }
+            }
+        } else if in_reasoning_block {
+            if line_str.starts_with('>') {
+                let content_start_index = if line_str.starts_with("> ") { 2 } else { 1 };
+                reasoning_text.push_str(&line_str[content_start_index..]);
+                reasoning_text.push('\n');
+            } else {
+                // Line does not start with '>', so reasoning block ends.
+                if !reasoning_text.is_empty() {
+                    result.push_str("<think>");
+                    result.push_str(reasoning_text.trim_end_matches('\n'));
+                    result.push_str("</think>\n");
+                    reasoning_text.clear();
+                }
+                in_reasoning_block = false;
+                result.push_str(line_str); // Current line is normal content
+                result.push('\n');
+            }
+        } else {
+            result.push_str(line_str);
+            result.push('\n');
+        }
+    }
+
+    // If the input ends while in a reasoning block
+    if in_reasoning_block && !reasoning_text.is_empty() {
+        result.push_str("<think>");
+        result.push_str(reasoning_text.trim_end_matches('\n'));
+        result.push_str("</think>\n");
+    }
+
+    // Preserve original ending: if original ended with \n, result should too.
+    // Otherwise, trim the final \n if result has one and original didn't.
+    let final_result = result.trim_end_matches('\n').to_string();
+    if content.ends_with('\n') && !final_result.is_empty() {
+        format!("{}\n", final_result)
+    } else {
+        final_result
+    }
+}
+
+// Struct and methods for processing thinking blocks in streaming mode
+struct PoeThinkingStreamProcessor {
+    active: bool,       // True if "Thinking..." has been encountered, looking for ">" or end of block
+    in_think_tag: bool, // True if <think> has been emitted and </think> has not
+    buffer: String,     // Accumulates current line being processed
+}
+
+impl PoeThinkingStreamProcessor {
+    fn new() -> Self {
+        PoeThinkingStreamProcessor {
+            active: false,
+            in_think_tag: false,
+            buffer: String::new(),
+        }
+    }
+
+    // Processes a single, complete line (must end with \n)
+    fn process_line_internal(&mut self, line_with_newline: &str) -> String {
+        let mut processed_line_output = String::new();
+        // Operate on the line without its trailing newline for logic, then add it back if needed.
+        let line_trimmed_content = line_with_newline.trim_end_matches('\n');
+        let trimmed_line_for_marker_check = line_trimmed_content.trim(); // For marker check
+
+        if !self.active {
+            if trimmed_line_for_marker_check == "Thinking..." || trimmed_line_for_marker_check == "*Thinking...*" {
+                self.active = true;
+                // "Thinking..." line is consumed.
+            } else {
+                processed_line_output.push_str(line_with_newline);
+            }
+        } else { // self.active is true
+            if !self.in_think_tag { // Looking for ">" or empty lines after "Thinking..."
+                if line_trimmed_content.is_empty() {
+                    // Still active, skipping empty line after "Thinking...". Consumed.
+                } else if line_trimmed_content.starts_with('>') {
+                    processed_line_output.push_str("<think>");
+                    self.in_think_tag = true;
+                    let content_start_index = if line_trimmed_content.starts_with("> ") { 2 } else { 1 };
+                    processed_line_output.push_str(&line_trimmed_content[content_start_index..]);
+                    processed_line_output.push('\n'); // Line content gets its newline
+                } else {
+                    // "Thinking..." was active, but next non-empty line isn't ">".
+                    // Thinking block is empty/false alarm. Deactivate.
+                    self.active = false;
+                    processed_line_output.push_str(line_with_newline); // Output current line as normal
+                }
+            } else { // self.in_think_tag is true
+                if line_trimmed_content.starts_with('>') {
+                    let content_start_index = if line_trimmed_content.starts_with("> ") { 2 } else { 1 };
+                    processed_line_output.push_str(&line_trimmed_content[content_start_index..]);
+                    processed_line_output.push('\n'); // Line content gets its newline
+                } else {
+                    // Line doesn't start with ">", so thinking block ends.
+                    processed_line_output.push_str("</think>\n"); // </think> gets its own newline
+                    self.in_think_tag = false;
+                    self.active = false; // Deactivate
+                    processed_line_output.push_str(line_with_newline); // Output current line as normal
+                }
+            }
+        }
+        processed_line_output
+    }
+
+    // Process an incoming chunk of text, may contain multiple lines or partial lines
+    pub fn process_chunk(&mut self, chunk: &str) -> String {
+        self.buffer.push_str(chunk);
+        let mut output_for_this_chunk = String::new();
+
+        while let Some(newline_pos) = self.buffer.find('\n') {
+            let line_to_process = self.buffer.drain(..=newline_pos).collect::<String>();
+            output_for_this_chunk.push_str(&self.process_line_internal(&line_to_process));
+        }
+        // Remaining in buffer is a partial line, to be processed by next call or finalize()
+        output_for_this_chunk
+    }
+
+    // Called at the end of the stream to process any remaining buffer and close tags
+    pub fn finalize(&mut self) -> String {
+        let mut final_output = String::new();
+        if !self.buffer.is_empty() {
+            let last_line_from_buffer = self.buffer.drain(..).collect::<String>();
+            // Ensure it's processed as if it had a newline for consistent logic,
+            // then trim the added newline if the original buffer didn't end with one.
+            let needs_trailing_newline_in_original_buffer = last_line_from_buffer.ends_with('\n');
+            let line_to_process_for_logic = if needs_trailing_newline_in_original_buffer {
+                last_line_from_buffer.clone()
+            } else {
+                format!("{}\n", last_line_from_buffer) // Temporarily add \n
+            };
+            
+            let processed_buffered_content = self.process_line_internal(&line_to_process_for_logic);
+
+            if needs_trailing_newline_in_original_buffer {
+                final_output.push_str(&processed_buffered_content);
+            } else {
+                final_output.push_str(processed_buffered_content.trim_end_matches('\n'));
+            }
+        }
+
+        if self.in_think_tag {
+            // If an open <think> tag exists, close it.
+            // Content inside <think> should have its newlines handled by process_line_internal.
+            // Add newline after </think> if final_output is not empty and doesn't end with one,
+            // or if final_output is empty (meaning </think> is on its own line).
+            if !final_output.is_empty() && !final_output.ends_with('\n') {
+                 final_output.push('\n'); // Ensure content before </think> ends with newline
+            }
+            final_output.push_str("</think>");
+            // If final_output was empty, </think> is by itself. If it's the very end of all text,
+            // a final \n might be desired by consumers, but usually [DONE] follows.
+            // Let's ensure </think> itself doesn't add an extra \n if not needed.
+            // The `process_line_internal` adds \n after content. `</think>\n` is common.
+            // If `final_output` is empty, `</think>` is the only thing.
+            // If `final_output` has content, it ends with `\n`. So `</think>` follows.
+            // Let's make sure </think> is followed by a newline if it's not the absolute end of all text.
+            // The `create_stream_chunk` will send this. If it's the last text before [DONE],
+            // it should probably end with a newline.
+            // The `</think>\n` in `process_line_internal` handles cases where content follows.
+            // Here, it's the absolute end of the <think> block.
+            if !final_output.ends_with('\n') { // If, after appending </think>, it doesn't end with \n
+                final_output.push('\n'); // Add one.
+            }
+
+            self.in_think_tag = false; // Mark as closed
+        }
+        self.active = false; // Reset active state
+        final_output
+    }
+}
+
+
 #[handler]
 pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     let start_time = Instant::now();
@@ -287,10 +503,15 @@ async fn handle_stream_response(
 
             stream::once(async move {
                 // 將初始內容傳遞給 handle_replace_response
-                let content =
+                let original_content =
                     handle_replace_response(event_stream, initial_content_for_handler).await;
                 debug!(
-                    "📤 ReplaceResponse 處理完成 | 最終內容長度: {}",
+                    "📤 ReplaceResponse 原始內容長度: {}",
+                    format_bytes_length(original_content.len())
+                );
+                let content = format_reasoning_content(&original_content);
+                debug!(
+                    "📤 ReplaceResponse 處理後內容長度: {}",
                     format_bytes_length(content.len())
                 );
 
@@ -313,42 +534,56 @@ async fn handle_stream_response(
         res.stream(processed_stream);
     } else {
         debug!("🔄 使用標準串流處理模式");
-        let initial_chunk = create_stream_chunk(&id, created, &model, &full_content, None);
+
+        // Initialize the thinking processor and process the initial full_content
+        let mut stream_processor = PoeThinkingStreamProcessor::new();
+        let processed_initial_text = stream_processor.process_chunk(&full_content);
+        // Note: any remaining buffer in stream_processor is for the *next* chunk from event_stream.
+        // finalize() is not called here as the stream continues.
+
+        let initial_chunk = create_stream_chunk(&id, created, &model, &processed_initial_text, None);
         let initial_chunk_json = serde_json::to_string(&initial_chunk).unwrap();
         let initial_message = format!("data: {}\n\n", initial_chunk_json);
 
         let processed_stream = {
-            let id = id.clone(); // 為閉包克隆一個副本
-            let model = model.clone(); // 為閉包克隆一個副本
+            let id_clone = id.clone();
+            let model_clone = model.clone();
 
             stream::once(future::ready(Ok::<_, std::convert::Infallible>(
                 initial_message,
             )))
             .chain(stream::unfold(
-                (event_stream, false),
-                move |(mut event_stream, mut is_done)| {
-                    let id = id.clone();
-                    let model = model.clone();
+                // Pass the processor with its current state into unfold
+                (event_stream, false, stream_processor),
+                move |(mut event_stream, mut is_done, mut processor)| { // Use 'processor'
+                    let id = id_clone.clone();
+                    let model = model_clone.clone();
 
                     async move {
                         if is_done {
-                            debug!("✅ 串流處理完成");
+                            debug!("✅ 串流處理完成 (unfold loop end)");
                             return None;
                         }
                         match event_stream.next().await {
                             Some(Ok(event)) => match event.event {
                                 EventType::Text => {
                                     if let Some(data) = event.data {
-                                        let chunk = create_stream_chunk(
-                                            &id, created, &model, &data.text, None,
-                                        );
-                                        let chunk_json = serde_json::to_string(&chunk).unwrap();
-                                        Some((
-                                            Ok(format!("data: {}\n\n", chunk_json)),
-                                            (event_stream, is_done),
-                                        ))
+                                        let processed_text_chunk = processor.process_chunk(&data.text);
+                                        if !processed_text_chunk.is_empty() {
+                                            let chunk = create_stream_chunk(
+                                                &id, created, &model, &processed_text_chunk, None,
+                                            );
+                                            let chunk_json = serde_json::to_string(&chunk).unwrap();
+                                            Some((
+                                                Ok(format!("data: {}\n\n", chunk_json)),
+                                                (event_stream, is_done, processor),
+                                            ))
+                                        } else {
+                                            // No output from processor for this chunk, continue
+                                            Some((Ok(String::new()), (event_stream, is_done, processor)))
+                                        }
                                     } else {
-                                        Some((Ok(String::new()), (event_stream, is_done)))
+                                        Some((Ok(String::new()), (event_stream, is_done, processor)))
                                     }
                                 }
                                 EventType::Json => {
@@ -383,17 +618,19 @@ async fn handle_stream_response(
 
                                         Some((
                                             Ok(format!("data: {}\n\n", tool_chunk_json)),
-                                            (event_stream, is_done),
+                                            (event_stream, is_done, processor),
                                         ))
                                     } else {
                                         debug!("⏭️ 收到 JSON 事件但沒有工具調用");
-                                        Some((Ok(String::new()), (event_stream, is_done)))
+                                        Some((Ok(String::new()), (event_stream, is_done, processor)))
                                     }
                                 }
                                 EventType::Error => {
                                     if let Some(error) = event.error {
                                         error!("❌ 串流處理錯誤: {}", error.text);
-                                        let error_chunk = json!({
+                                        // Finalize processor state before erroring out, though its output might be lost
+                                        let _ = processor.finalize();
+                                        let error_chunk_val = json!({ // Renamed to avoid conflict
                                             "error": {
                                                 "message": error.text,
                                                 "type": "stream_error",
@@ -402,36 +639,43 @@ async fn handle_stream_response(
                                         });
                                         let error_message = format!(
                                             "data: {}\n\ndata: [DONE]\n\n",
-                                            serde_json::to_string(&error_chunk).unwrap()
+                                            serde_json::to_string(&error_chunk_val).unwrap()
                                         );
-                                        Some((Ok(error_message), (event_stream, true)))
+                                        Some((Ok(error_message), (event_stream, true, processor)))
                                     } else {
-                                        Some((Ok(String::new()), (event_stream, true)))
+                                        Some((Ok(String::new()), (event_stream, true, processor)))
                                     }
                                 }
                                 EventType::Done => {
-                                    debug!("✅ 串流完成");
-                                    is_done = true;
-                                    let final_chunk = create_stream_chunk(
+                                    debug!("✅ 串流完成 (EventType::Done received)");
+                                    is_done = true; // Mark as done for the unfold loop
+
+                                    let final_processed_text = processor.finalize();
+                                    let mut messages_to_send = Vec::new();
+
+                                    if !final_processed_text.is_empty() {
+                                        let content_chunk = create_stream_chunk(&id, created, &model, &final_processed_text, None);
+                                        messages_to_send.push(format!("data: {}\n\n", serde_json::to_string(&content_chunk).unwrap()));
+                                    }
+
+                                    let final_stop_chunk = create_stream_chunk(
                                         &id,
                                         created,
                                         &model,
-                                        "",
+                                        "", // No text content for the stop chunk itself
                                         Some("stop".to_string()),
                                     );
-                                    let final_chunk_json =
-                                        serde_json::to_string(&final_chunk).unwrap();
+                                    messages_to_send.push(format!("data: {}\n\n", serde_json::to_string(&final_stop_chunk).unwrap()));
+                                    messages_to_send.push("data: [DONE]\n\n".to_string());
+                                    
                                     Some((
-                                        Ok(format!(
-                                            "data: {}\n\ndata: [DONE]\n\n",
-                                            final_chunk_json
-                                        )),
-                                        (event_stream, is_done),
+                                        Ok(messages_to_send.join("")),
+                                        (event_stream, is_done, processor),
                                     ))
                                 }
                                 _ => {
                                     debug!("⏭️ 忽略其他事件類型");
-                                    Some((Ok(String::new()), (event_stream, is_done)))
+                                    Some((Ok(String::new()), (event_stream, is_done, processor)))
                                 }
                             },
                             _ => None,
@@ -519,11 +763,17 @@ async fn handle_non_stream_response(
         debug!("🔄 使用 ReplaceResponse 處理模式 (非串流)");
         // 將初始內容傳遞給 handle_replace_response
         let initial_content_for_handler = full_content.clone();
-        let content = handle_replace_response(event_stream, initial_content_for_handler).await;
+        let original_content = handle_replace_response(event_stream, initial_content_for_handler).await;
         debug!(
-            "📤 ReplaceResponse 最終內容長度 (非串流): {}",
+            "📤 ReplaceResponse 原始內容長度 (非串流): {}",
+            format_bytes_length(original_content.len())
+        );
+        let content = format_reasoning_content(&original_content);
+        debug!(
+            "📤 ReplaceResponse 處理後內容長度 (非串流): {}",
             format_bytes_length(content.len())
-        ); // 區分日誌
+        );
+
 
         // 在 ReplaceResponse 模式下，我們不處理工具調用
         let response = ChatCompletionResponse {
@@ -589,10 +839,13 @@ async fn handle_non_stream_response(
         } else {
             "stop".to_string()
         };
+        
+        let processed_response_content = format_reasoning_content(&response_content);
 
         debug!(
-            "📤 準備發送回應 | 內容長度: {} | 工具調用數量: {} | 完成原因: {}",
+            "📤 準備發送回應 | 原始內容長度: {} | 處理後內容長度: {} | 工具調用數量: {} | 完成原因: {}",
             format_bytes_length(response_content.len()),
+            format_bytes_length(processed_response_content.len()),
             accumulated_tool_calls.len(),
             finish_reason
         );
@@ -606,7 +859,7 @@ async fn handle_non_stream_response(
                 index: 0,
                 message: CompletionMessage {
                     role: "assistant".to_string(),
-                    content: response_content,
+                    content: processed_response_content, // Use processed content
                     refusal: None,
                     tool_calls: if accumulated_tool_calls.is_empty() {
                         None

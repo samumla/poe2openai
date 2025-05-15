@@ -1,0 +1,14 @@
+services:
+  poe2openai:
+    image: devanenwl/boe:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - LOG_LEVEL=info
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=123456
+      - MAX_REQUEST_SIZE=1073741824
+      - CONFIG_DIR=/data
+    volumes:
+      - ./data:/data
